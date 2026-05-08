@@ -1,0 +1,25 @@
+[Unit]
+Description=PTT Alertor Discord Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=abc12david
+WorkingDirectory=/home/abc12david/ptt-alertor-discord
+ExecStart=/usr/bin/node src/index.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ptt-alertor
+
+# Resource limits for e2-micro
+MemoryMax=128M
+CPUQuota=50%
+
+# Environment
+EnvironmentFile=/home/abc12david/ptt-alertor-discord/.env
+
+[Install]
+WantedBy=multi-user.target
