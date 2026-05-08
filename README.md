@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/27530565/README.md)
 # PTT Alertor Discord Bot
 
 一個極度輕量、針對低資源環境（如 Google Cloud e2-micro VM）優化的 PTT 文章追蹤機器人。

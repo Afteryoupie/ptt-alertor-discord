@@ -1,7 +1,9 @@
 'use strict';
 
-const { SlashCommandBuilder, ChannelType } = require('discord.js');
+const { SlashCommandBuilder, ChannelType, MessageFlags } = require('discord.js');
 const db = require('../database');
+const { crawlBoard, matchKeyword, matchAuthor, fetchBoardPage, parseArticles } = require('../scraper');
+const { sendNotifications } = require('../notifier');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -9,8 +11,9 @@ module.exports = {
     .setDescription('訂閱 PTT 看板的文章通知')
     .addStringOption(opt =>
       opt.setName('board')
-        .setDescription('看板名稱，例如：DC_SALE')
+        .setDescription('看板名稱 (可直接輸入或選擇推薦)')
         .setRequired(true)
+        .setAutocomplete(true)
     )
     .addStringOption(opt =>
       opt.setName('type')
@@ -39,6 +42,23 @@ module.exports = {
     const targetId   = inDM ? userId : interaction.channelId;
 
     try {
+      // Check for duplicate
+      const existing = db.findSubscription({
+        user_id: userId,
+        target_id: targetId,
+        board,
+        type,
+        match_value: matchValue,
+      });
+
+      if (existing) {
+        await interaction.reply({
+          content: `⚠️ 您已經訂閱過 **[${board}]** 的 ${type === 'keyword' ? '關鍵字' : '作者'} \`${matchValue}\` 了（編號：\`${existing.id}\`）。`,
+          flags: [MessageFlags.Ephemeral],
+        });
+        return;
+      }
+
       const id = db.addSubscription({
         user_id:     userId,
         target_id:   targetId,
@@ -48,14 +68,81 @@ module.exports = {
         match_value: matchValue,
       });
 
+      // Get the current list to find the sequential index of the new subscription
+      const rows = db.listSubscriptions({ user_id: userId, target_id: targetId });
+      const index = rows.length;
+
       const dest = inDM ? '私訊' : `<#${targetId}>`;
       await interaction.reply({
-        content: `✅ 已訂閱 **[${board}]** 的 ${type === 'keyword' ? '關鍵字' : '作者'} \`${matchValue}\`\n通知將發送至：${dest}\n（訂閱編號：\`${id}\`，可用 \`/unsubscribe\` 刪除）`,
-        ephemeral: true,
+        content: `✅ 已訂閱 **[${board}]** 的 ${type === 'keyword' ? '關鍵字' : '作者'} \`${matchValue}\`\n通知將發送至：${dest}\n（目前總計第 \`${index}\` 筆訂閱，可用 \`/unsubscribe\` 刪除）\n\n*正在嘗試抓取最新一篇文章進行確認...*`,
+        flags: [MessageFlags.Ephemeral],
       });
+
+      // --- Instant Verification ---
+      try {
+        // Fetch current articles (pass null to get everything on page)
+        const { currentNewestAid } = await crawlBoard(board, null);
+        
+        const html = await fetchBoardPage(board);
+        const articles = parseArticles(html);
+
+        // Find the LATEST (last in the reversed array) that matches
+        let lastMatch = null;
+        for (let i = articles.length - 1; i >= 0; i--) {
+          const a = articles[i];
+          const matched = (type === 'keyword') ? matchKeyword(a.title, matchValue) : matchAuthor(a.author, matchValue);
+          if (matched) {
+            lastMatch = a;
+            break;
+          }
+        }
+
+        if (lastMatch) {
+          await sendNotifications(interaction.client, [{
+            article: lastMatch,
+            board,
+            matchType: type,
+            matchValue: matchValue,
+            targetId: targetId,
+            targetType: targetType
+          }]);
+        } else {
+          await interaction.followUp({
+            content: `💡 訂閱成功，但在 **[${board}]** 的首頁目前沒看到符合 \`${matchValue}\` 的最新文章。\n之後若有新貼文我會立刻通知您！`,
+            flags: [MessageFlags.Ephemeral],
+          });
+        }
+
+        // Also, if this is a brand new board for the whole system,
+        // initialize its state so we don't spam old posts in the next loop.
+        if (!db.getBoardState(board) && currentNewestAid) {
+          db.upsertBoardState(board, currentNewestAid);
+        }
+
+      } catch (crawlErr) {
+        console.error('[subscribe-verify] Error:', crawlErr.message);
+        await interaction.followUp({
+          content: `⚠️ 訂閱已紀錄，但抓取測試文章時發生錯誤（${crawlErr.message}）。\n請放心，背景監控仍會持續運作。`,
+          flags: [MessageFlags.Ephemeral],
+        });
+      }
+
     } catch (err) {
       console.error('[subscribe] Error:', err);
-      await interaction.reply({ content: '❌ 訂閱失敗，請稍後再試。', ephemeral: true });
+      await interaction.reply({ content: '❌ 訂閱失敗，請稍後再試。', flags: [MessageFlags.Ephemeral] });
     }
+  },
+
+  async autocomplete(interaction) {
+    const focusedValue = interaction.options.getFocused().toLowerCase();
+    const choices = ['MacShop', 'DC_SALE', 'steam', 'Gossiping', 'Lifeismoney', 'Life', 'Gamesale', 'HardwareSale'];
+    
+    const filtered = choices
+      .filter(choice => choice.toLowerCase().includes(focusedValue))
+      .slice(0, 25); // Discord limit is 25
+
+    await interaction.respond(
+      filtered.map(choice => ({ name: choice, value: choice }))
+    );
   },
 };

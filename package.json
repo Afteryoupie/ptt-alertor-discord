@@ -4,7 +4,8 @@
   "description": "PTT article alertor Discord bot - resource optimized for e2-micro VM",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node --max-old-space-size=128 src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
     "deploy-commands": "node src/deploy-commands.js"
   },
   "keywords": ["ptt", "discord", "bot", "alertor"],
@@ -14,7 +15,6 @@
   "dependencies": {
     "better-sqlite3": "^9.4.3",
     "discord.js": "^14.14.1",
-    "dotenv": "^16.4.5",
-    "undici": "^6.10.2"
+    "dotenv": "^16.4.5"
   }
 }

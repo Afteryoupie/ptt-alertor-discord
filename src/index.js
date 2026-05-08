@@ -2,7 +2,7 @@
 
 require('dotenv').config();
 
-const { Client, GatewayIntentBits, Collection } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, MessageFlags } = require('discord.js');
 const path = require('path');
 const fs   = require('fs');
 
@@ -45,27 +45,36 @@ for (const file of fs.readdirSync(commandsDir).filter(f => f.endsWith('.js'))) {
 
 // ─── Event Handlers ───────────────────────────────────────────────────────────
 
-client.once('ready', () => {
+client.once('clientReady', () => {
   console.log(`[startup] ✅ Logged in as ${client.user.tag}`);
   console.log(`[startup] 🕒 Poll interval: ${POLL_INTERVAL / 1000}s`);
   startScraperLoop();
 });
 
 client.on('interactionCreate', async interaction => {
-  if (!interaction.isChatInputCommand()) return;
+  if (interaction.isChatInputCommand()) {
+    const cmd = client.commands.get(interaction.commandName);
+    if (!cmd) return;
 
-  const cmd = client.commands.get(interaction.commandName);
-  if (!cmd) return;
+    try {
+      await cmd.execute(interaction);
+    } catch (err) {
+      console.error(`[commands] Error in /${interaction.commandName}:`, err);
+      const msg = { content: '❌ 指令執行發生錯誤，請稍後再試。', flags: [MessageFlags.Ephemeral] };
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp(msg).catch(() => {});
+      } else {
+        await interaction.reply(msg).catch(() => {});
+      }
+    }
+  } else if (interaction.isAutocomplete()) {
+    const cmd = client.commands.get(interaction.commandName);
+    if (!cmd || !cmd.autocomplete) return;
 
-  try {
-    await cmd.execute(interaction);
-  } catch (err) {
-    console.error(`[commands] Error in /${interaction.commandName}:`, err);
-    const msg = { content: '❌ 指令執行發生錯誤，請稍後再試。', ephemeral: true };
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp(msg).catch(() => {});
-    } else {
-      await interaction.reply(msg).catch(() => {});
+    try {
+      await cmd.autocomplete(interaction);
+    } catch (err) {
+      console.error(`[autocomplete] Error in /${interaction.commandName}:`, err);
     }
   }
 });
@@ -94,9 +103,12 @@ function startScraperLoop() {
 
     try {
       const boards = db.getAllBoards();
-      if (!boards.length) return;
+      if (!boards.length) {
+        console.log('[scraper] 目前沒有任何訂閱，跳過循環。');
+        return;
+      }
 
-      console.log(`[scraper] Starting cycle for ${boards.length} board(s)...`);
+      console.log(`[scraper] === 開始掃描循環 (${boards.length} 個看板) ===`);
       const allMatches = [];
 
       for (const board of boards) {
@@ -109,15 +121,22 @@ function startScraperLoop() {
             db.upsertBoardState(board, currentNewestAid);
           }
 
-          if (!newArticles.length) continue;
+          if (!newArticles.length) {
+            // No new articles since last check
+            continue;
+          }
 
-          console.log(`[scraper] Board ${board}: ${newArticles.length} new article(s)`);
-
-          // Match new articles against all subscriptions for this board
           const subs = db.getSubsForBoard(board);
+          console.log(`[scraper] [${board}] 發現 ${newArticles.length} 篇新文章，比對 ${subs.length} 筆訂閱中...`);
+
+          // Track (targetId + aid) to avoid duplicate notifications for the same article in one target
+          const notifiedInThisCycle = new Set();
 
           for (const article of newArticles) {
             for (const sub of subs) {
+              const dupKey = `${sub.target_id}-${article.aid}`;
+              if (notifiedInThisCycle.has(dupKey)) continue;
+
               let matched = false;
 
               if (sub.type === 'keyword') {
@@ -135,6 +154,7 @@ function startScraperLoop() {
                   targetId:   sub.target_id,
                   targetType: sub.target_type,
                 });
+                notifiedInThisCycle.add(dupKey);
               }
             }
           }
@@ -150,11 +170,11 @@ function startScraperLoop() {
 
       // Send all collected notifications
       if (allMatches.length) {
-        console.log(`[scraper] Sending ${allMatches.length} notification(s)...`);
+        console.log(`[scraper] 🚀 成功匹配！正在發送 ${allMatches.length} 則通知...`);
         await sendNotifications(client, allMatches);
       }
 
-      console.log('[scraper] Cycle complete.');
+      console.log(`[scraper] === 循環結束 (${new Date().toLocaleTimeString('zh-TW')}) ===`);
     } catch (err) {
       console.error('[scraper] Unexpected error in tick:', err);
     } finally {

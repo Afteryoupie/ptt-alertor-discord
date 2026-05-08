@@ -1,6 +1,4 @@
-'use strict';
-
-const { fetch } = require('undici');
+// Using native fetch available in Node.js v18+
 
 // PTT base URL
 const PTT_BASE = 'https://www.ptt.cc';
@@ -28,8 +26,18 @@ async function fetchBoardPage(board) {
     headers: {
       'User-Agent': randomUA(),
       'Cookie': 'over18=1',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+      'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Referer': 'https://www.ptt.cc/bbs/index.html',
+      'Cache-Control': 'max-age=0',
+      'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+      'Sec-Ch-Ua-Mobile': '?0',
+      'Sec-Ch-Ua-Platform': '"macOS"',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'same-origin',
+      'Sec-Fetch-User': '?1',
+      'Upgrade-Insecure-Requests': '1',
     },
     signal: AbortSignal.timeout(15_000),
   });
@@ -60,6 +68,7 @@ function parseArticles(html) {
   const titleRe = /<a[^>]*>([^<]*)<\/a>/;
   const authorRe = /<div class="author">([^<]*)<\/div>/;
   const deletedRe = /\(本文已被刪除\)|<div class="title">\s*<\/div>/;
+  const annRe = /^\[公告\]/; // Announcement filter
 
   let match;
   while ((match = entryRe.exec(html)) !== null) {
@@ -80,16 +89,21 @@ function parseArticles(html) {
     const aidMatch = /\/([^/]+)\.html$/.exec(url);
     if (!aidMatch) continue;
 
+    const title = titleMatch[1].trim();
+    // Skip announcements to reduce noise
+    if (annRe.test(title)) continue;
+
     articles.push({
       aid: aidMatch[1],
-      title: titleMatch[1].trim(),
+      title,
       author: authorMatch ? authorMatch[1].trim() : '',
       url: PTT_BASE + url,
     });
   }
 
-  // PTT lists newest first; reverse so we iterate oldest→newest
-  return articles.reverse();
+  // PTT lists oldest at top, newest at bottom.
+  // We keep this order [oldest -> newest] so the last element is the newest.
+  return articles;
 }
 
 /**
@@ -126,7 +140,7 @@ function getNewestAid(articles) {
  * @returns {boolean}
  */
 function matchKeyword(title, expr) {
-  const tokens = expr.split(/\s+/).filter(Boolean);
+  const tokens = expr.split(/[\s\u3000]+/).filter(Boolean);
   const lowerTitle = title.toLowerCase();
 
   for (const token of tokens) {
@@ -176,4 +190,6 @@ module.exports = {
   crawlBoard,
   matchKeyword,
   matchAuthor,
+  fetchBoardPage,
+  parseArticles,
 };

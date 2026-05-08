@@ -25,7 +25,7 @@ db.exec(`
     user_id     TEXT NOT NULL,
     target_id   TEXT NOT NULL,
     target_type TEXT NOT NULL CHECK(target_type IN ('channel', 'dm')),
-    board       TEXT NOT NULL,
+    board       TEXT NOT NULL COLLATE NOCASE,
     type        TEXT NOT NULL CHECK(type IN ('keyword', 'author')),
     match_value TEXT NOT NULL,
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -35,7 +35,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_subscriptions_user  ON subscriptions(user_id);
 
   CREATE TABLE IF NOT EXISTS board_state (
-    board    TEXT PRIMARY KEY,
+    board    TEXT PRIMARY KEY COLLATE NOCASE,
     last_aid TEXT
   );
 `);
@@ -78,6 +78,11 @@ const stmts = {
     VALUES (@board, @last_aid)
     ON CONFLICT(board) DO UPDATE SET last_aid = excluded.last_aid
   `),
+
+  findSubscription: db.prepare(`
+    SELECT id FROM subscriptions
+    WHERE user_id = @user_id AND target_id = @target_id AND board = @board AND type = @type AND match_value = @match_value
+  `),
 };
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -113,7 +118,8 @@ function listSubscriptions({ user_id, target_id }) {
  * @returns {string[]}
  */
 function getAllBoards() {
-  return stmts.getAllBoards.all().map(r => r.board);
+  const rows = stmts.getAllBoards.all();
+  return rows.map(r => r.board);
 }
 
 /**
@@ -138,6 +144,13 @@ function upsertBoardState(board, last_aid) {
   stmts.upsertBoardState.run({ board, last_aid });
 }
 
+/**
+ * Check if a subscription already exists.
+ */
+function findSubscription(params) {
+  return stmts.findSubscription.get(params);
+}
+
 module.exports = {
   addSubscription,
   removeSubscription,
@@ -146,4 +159,5 @@ module.exports = {
   getSubsForBoard,
   getBoardState,
   upsertBoardState,
+  findSubscription,
 };
