@@ -8,16 +8,16 @@ const { sendNotifications } = require('../notifier');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('subscribe')
-    .setDescription('訂閱 PTT 看板的文章通知')
+    .setDescription('訂閱 PTT 看板的文章通知（支援多關鍵字、排除詞、作者）')
     .addStringOption(opt =>
       opt.setName('board')
-        .setDescription('看板名稱 (可直接輸入或選擇推薦)')
+        .setDescription('看板名稱 (如: MacShop, Lifeismoney)')
         .setRequired(true)
         .setAutocomplete(true)
     )
     .addStringOption(opt =>
       opt.setName('type')
-        .setDescription('追蹤類型')
+        .setDescription('追蹤類型：關鍵字或作者')
         .setRequired(true)
         .addChoices(
           { name: '關鍵字', value: 'keyword' },
@@ -26,7 +26,7 @@ module.exports = {
     )
     .addStringOption(opt =>
       opt.setName('value')
-        .setDescription('關鍵字（支援 -排除詞，例：iPhone -128G）或作者 ID')
+        .setDescription('關鍵字 (多個用空格隔開為 AND，-排除詞) 或作者 ID (皆不分大小寫)')
         .setRequired(true)
     ),
 
