@@ -38,6 +38,25 @@ db.exec(`
     board    TEXT PRIMARY KEY COLLATE NOCASE,
     last_aid TEXT
   );
+
+  -- Shop restock tracking
+  CREATE TABLE IF NOT EXISTS shop_subscriptions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      TEXT NOT NULL,
+    target_id    TEXT NOT NULL,
+    target_type  TEXT NOT NULL CHECK(target_type IN ('channel', 'dm')),
+    category_url TEXT NOT NULL,
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_shop_subs_category ON shop_subscriptions(category_url);
+  CREATE INDEX IF NOT EXISTS idx_shop_subs_user     ON shop_subscriptions(user_id);
+
+  CREATE TABLE IF NOT EXISTS shop_snapshots (
+    category_url TEXT PRIMARY KEY,
+    snapshot_json TEXT NOT NULL,
+    updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // ─── Prepared Statements ────────────────────────────────────────────────────
@@ -82,6 +101,51 @@ const stmts = {
   findSubscription: db.prepare(`
     SELECT id FROM subscriptions
     WHERE user_id = @user_id AND target_id = @target_id AND board = @board AND type = @type AND match_value = @match_value
+  `),
+
+  // ── Shop restock ──────────────────────────────────────────────────────────
+
+  addShopSubscription: db.prepare(`
+    INSERT INTO shop_subscriptions (user_id, target_id, target_type, category_url)
+    VALUES (@user_id, @target_id, @target_type, @category_url)
+  `),
+
+  removeShopSubscription: db.prepare(`
+    DELETE FROM shop_subscriptions WHERE id = @id AND user_id = @user_id
+  `),
+
+  listShopByUser: db.prepare(`
+    SELECT id, category_url, target_type
+    FROM shop_subscriptions
+    WHERE user_id = @user_id AND target_id = @target_id
+    ORDER BY id ASC
+  `),
+
+  getAllShopCategories: db.prepare(`
+    SELECT DISTINCT category_url FROM shop_subscriptions
+  `),
+
+  getShopSubsForCategory: db.prepare(`
+    SELECT id, user_id, target_id, target_type
+    FROM shop_subscriptions
+    WHERE category_url = @category_url
+  `),
+
+  findShopSubscription: db.prepare(`
+    SELECT id FROM shop_subscriptions
+    WHERE user_id = @user_id AND target_id = @target_id AND category_url = @category_url
+  `),
+
+  getShopSnapshot: db.prepare(`
+    SELECT snapshot_json FROM shop_snapshots WHERE category_url = @category_url
+  `),
+
+  upsertShopSnapshot: db.prepare(`
+    INSERT INTO shop_snapshots (category_url, snapshot_json, updated_at)
+    VALUES (@category_url, @snapshot_json, CURRENT_TIMESTAMP)
+    ON CONFLICT(category_url) DO UPDATE SET
+      snapshot_json = excluded.snapshot_json,
+      updated_at    = CURRENT_TIMESTAMP
   `),
 };
 
@@ -151,6 +215,56 @@ function findSubscription(params) {
   return stmts.findSubscription.get(params);
 }
 
+// ─── Shop Restock API ────────────────────────────────────────────────────────
+
+/** Add a shop restock subscription. */
+function addShopSubscription(params) {
+  const result = stmts.addShopSubscription.run(params);
+  return result.lastInsertRowid;
+}
+
+/** Remove a shop subscription (only if owned by user_id). */
+function removeShopSubscription({ id, user_id }) {
+  const result = stmts.removeShopSubscription.run({ id, user_id });
+  return result.changes;
+}
+
+/** List all shop subscriptions for a user in a channel/dm. */
+function listShopSubscriptions({ user_id, target_id }) {
+  return stmts.listShopByUser.all({ user_id, target_id });
+}
+
+/** Get all distinct category URLs that have at least one shop subscription. */
+function getAllShopCategories() {
+  const rows = stmts.getAllShopCategories.all();
+  return rows.map(r => r.category_url);
+}
+
+/** Get all shop subscriptions for a specific category URL. */
+function getShopSubsForCategory(category_url) {
+  return stmts.getShopSubsForCategory.all({ category_url });
+}
+
+/** Check if a shop subscription already exists. */
+function findShopSubscription(params) {
+  return stmts.findShopSubscription.get(params);
+}
+
+/** Get the persisted inventory snapshot for a category (parsed JSON or null). */
+function getShopSnapshot(category_url) {
+  const row = stmts.getShopSnapshot.get({ category_url });
+  if (!row) return null;
+  try { return JSON.parse(row.snapshot_json); } catch { return null; }
+}
+
+/** Save/update the inventory snapshot for a category. */
+function upsertShopSnapshot(category_url, snapshotObj) {
+  stmts.upsertShopSnapshot.run({
+    category_url,
+    snapshot_json: JSON.stringify(snapshotObj),
+  });
+}
+
 module.exports = {
   addSubscription,
   removeSubscription,
@@ -160,4 +274,13 @@ module.exports = {
   getBoardState,
   upsertBoardState,
   findSubscription,
+  // shop
+  addShopSubscription,
+  removeShopSubscription,
+  listShopSubscriptions,
+  getAllShopCategories,
+  getShopSubsForCategory,
+  findShopSubscription,
+  getShopSnapshot,
+  upsertShopSnapshot,
 };

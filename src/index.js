@@ -8,13 +8,20 @@ const fs   = require('fs');
 
 const db                  = require('./database');
 const { crawlBoard, matchKeyword, matchAuthor } = require('./scraper');
-const { sendNotifications } = require('./notifier');
+const { sendNotifications, sendRestockNotifications } = require('./notifier');
+const {
+  snapshotCategory,
+  detectRestocks,
+  serializeSnapshot,
+  deserializeSnapshot,
+} = require('./shop-scraper');
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
 const TOKEN          = process.env.DISCORD_TOKEN;
-const POLL_INTERVAL  = parseInt(process.env.POLL_INTERVAL_MS  || '300000', 10); // 5 min
-const COOLDOWN_MS    = parseInt(process.env.COOLDOWN_MS        || '5000',   10); // 5s between boards
+const POLL_INTERVAL  = parseInt(process.env.POLL_INTERVAL_MS   || '300000', 10); // 5 min
+const COOLDOWN_MS    = parseInt(process.env.COOLDOWN_MS         || '5000',   10); // 5s between boards
+const SHOP_POLL_INTERVAL = parseInt(process.env.SHOP_POLL_INTERVAL_MS || '300000', 10); // 5 min
 
 if (!TOKEN) {
   console.error('[startup] ❌ DISCORD_TOKEN is not set. Please create a .env file.');
@@ -48,7 +55,9 @@ for (const file of fs.readdirSync(commandsDir).filter(f => f.endsWith('.js'))) {
 client.once('clientReady', () => {
   console.log(`[startup] ✅ Logged in as ${client.user.tag}`);
   console.log(`[startup] 🕒 Poll interval: ${POLL_INTERVAL / 1000}s`);
+  console.log(`[startup] 🛒 Shop poll interval: ${SHOP_POLL_INTERVAL / 1000}s`);
   startScraperLoop();
+  startShopScraperLoop();
 });
 
 client.on('interactionCreate', async interaction => {
@@ -185,6 +194,106 @@ function startScraperLoop() {
   // Run immediately on start, then every POLL_INTERVAL
   tick();
   setInterval(tick, POLL_INTERVAL);
+}
+
+// ─── Shop Restock Scraper Loop ────────────────────────────────────────────────
+
+/**
+ * Core shop restock loop:
+ * 1. Fetch all subscribed shop category URLs (distinct)
+ * 2. For each category: fetch current inventory snapshot from Funbox JSON API
+ * 3. Compare against stored snapshot to detect restocks
+ * 4. Notify subscribed channels/DMs and save updated snapshot
+ * 5. Wait SHOP_POLL_INTERVAL ms, then repeat
+ */
+function startShopScraperLoop() {
+  let running = false;
+
+  async function tick() {
+    if (running) {
+      console.warn('[shop] Previous cycle still running, skipping tick.');
+      return;
+    }
+    running = true;
+
+    try {
+      const categories = db.getAllShopCategories();
+      if (!categories.length) {
+        // No shop subscriptions yet — silent
+        return;
+      }
+
+      console.log(`[shop] === 開始掃描商品庫存 (${categories.length} 個分類) ===`);
+      const allRestockMatches = [];
+
+      for (const categoryUrl of categories) {
+        try {
+          // categoryUrl is the full URL string stored in DB
+          // Extract the path portion for the API call (e.g. "XI/KB")
+          const pathMatch = categoryUrl.match(/categories\/(.+)$/);
+          const categoryPath = pathMatch ? pathMatch[1] : categoryUrl;
+
+          // Fetch fresh snapshot
+          const currSnapshot = await snapshotCategory(categoryPath);
+
+          // Load previous snapshot
+          const prevRaw = db.getShopSnapshot(categoryUrl);
+          const prevSnapshot = prevRaw ? deserializeSnapshot(prevRaw) : null;
+
+          if (!prevSnapshot) {
+            // First run: just save baseline, no notifications
+            console.log(`[shop] [${categoryUrl}] 首次掃描，儲存基準庫存快照。`);
+            db.upsertShopSnapshot(categoryUrl, serializeSnapshot(currSnapshot));
+            continue;
+          }
+
+          // Detect restocks
+          const restocks = detectRestocks(prevSnapshot, currSnapshot);
+
+          // Always update snapshot
+          db.upsertShopSnapshot(categoryUrl, serializeSnapshot(currSnapshot));
+
+          if (!restocks.length) {
+            console.log(`[shop] [${categoryUrl}] 無補貨變動。`);
+            continue;
+          }
+
+          console.log(`[shop] [${categoryUrl}] 發現 ${restocks.length} 筆補貨！`);
+
+          const subs = db.getShopSubsForCategory(categoryUrl);
+          for (const restock of restocks) {
+            for (const sub of subs) {
+              allRestockMatches.push({
+                restock,
+                categoryUrl,
+                targetId:   sub.target_id,
+                targetType: sub.target_type,
+              });
+            }
+          }
+        } catch (err) {
+          console.error(`[shop] Error checking ${categoryUrl}:`, err.message);
+        }
+
+        // Polite cooldown between category requests
+        if (categories.length > 1) await sleep(COOLDOWN_MS);
+      }
+
+      if (allRestockMatches.length) {
+        console.log(`[shop] 🚀 發送 ${allRestockMatches.length} 則補貨通知...`);
+        await sendRestockNotifications(client, allRestockMatches);
+      }
+
+      console.log(`[shop] === 循環結束 (${new Date().toLocaleTimeString('zh-TW')}) ===`);
+    } catch (err) {
+      console.error('[shop] Unexpected error in tick:', err);
+    } finally {
+      running = false;
+    }
+  }
+
+  tick();
+  setInterval(tick, SHOP_POLL_INTERVAL);
 }
 
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
