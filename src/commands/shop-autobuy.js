@@ -86,7 +86,12 @@ module.exports = {
       // Defer ephemerally — cookie should never be visible to others
       await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
-      const rawCookie = interaction.options.getString('cookie', true).trim();
+      let rawCookie = interaction.options.getString('cookie', true).trim();
+
+      // If user pasted just the value without the key name, prepend it
+      if (!rawCookie.includes('=')) {
+        rawCookie = `_cyberbiz_session=${rawCookie}`;
+      }
 
       if (!rawCookie || rawCookie.length < 10) {
         return interaction.editReply({
