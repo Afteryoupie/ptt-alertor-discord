@@ -110,6 +110,12 @@ function startScraperLoop() {
       console.warn('[scraper] Previous cycle still running, skipping tick.');
       return;
     }
+
+    if (!isWithinOperatingHours()) {
+      console.log(`[scraper] ⏰ 目前非營業時間（10:00–19:00 台灣時間），跳過循環。`);
+      return;
+    }
+
     running = true;
 
     try {
@@ -216,6 +222,12 @@ function startShopScraperLoop() {
       console.warn('[shop] Previous cycle still running, skipping tick.');
       return;
     }
+
+    if (!isWithinOperatingHours()) {
+      console.log(`[shop] ⏰ 目前非營業時間（10:00–19:00 台灣時間），跳過循璳。`);
+      return;
+    }
+
     running = true;
 
     try {
@@ -336,6 +348,26 @@ function shutdown() {
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Returns true if current Taiwan time (Asia/Taipei) is within operating hours.
+ * Operating hours: 10:00 – 19:00 (7 PM)
+ * @returns {boolean}
+ */
+function isWithinOperatingHours() {
+  const now = new Date();
+  // Format hour in Taiwan timezone (UTC+8)
+  const hour = parseInt(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Taipei',
+      hour: 'numeric',
+      hour12: false,
+    }).format(now),
+    10
+  );
+  // Allow 10:00 (inclusive) through 18:xx (i.e. before 19:00)
+  return hour >= 10 && hour < 19;
 }
 
 client.login(TOKEN).catch(err => {
