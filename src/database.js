@@ -57,6 +57,16 @@ db.exec(`
     snapshot_json TEXT NOT NULL,
     updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- Auto-buy: encrypted session cookies per user
+  CREATE TABLE IF NOT EXISTS autobuy_configs (
+    user_id          TEXT PRIMARY KEY,
+    encrypted_cookie TEXT NOT NULL,
+    iv               TEXT NOT NULL,
+    auth_tag         TEXT NOT NULL,
+    created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // ─── Prepared Statements ────────────────────────────────────────────────────
@@ -146,6 +156,30 @@ const stmts = {
     ON CONFLICT(category_url) DO UPDATE SET
       snapshot_json = excluded.snapshot_json,
       updated_at    = CURRENT_TIMESTAMP
+  `),
+
+  // ── Auto-buy config ──────────────────────────────────────────────────────
+
+  setAutobuyConfig: db.prepare(`
+    INSERT INTO autobuy_configs (user_id, encrypted_cookie, iv, auth_tag, updated_at)
+    VALUES (@user_id, @encrypted_cookie, @iv, @auth_tag, CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id) DO UPDATE SET
+      encrypted_cookie = excluded.encrypted_cookie,
+      iv               = excluded.iv,
+      auth_tag         = excluded.auth_tag,
+      updated_at       = CURRENT_TIMESTAMP
+  `),
+
+  getAutobuyConfig: db.prepare(`
+    SELECT encrypted_cookie, iv, auth_tag FROM autobuy_configs WHERE user_id = @user_id
+  `),
+
+  deleteAutobuyConfig: db.prepare(`
+    DELETE FROM autobuy_configs WHERE user_id = @user_id
+  `),
+
+  hasAutobuyConfig: db.prepare(`
+    SELECT 1 FROM autobuy_configs WHERE user_id = @user_id
   `),
 };
 
@@ -265,6 +299,43 @@ function upsertShopSnapshot(category_url, snapshotObj) {
   });
 }
 
+// ─── Auto-buy Config API ─────────────────────────────────────────────────────
+
+/**
+ * Save or update the encrypted autobuy config for a user.
+ * @param {{ user_id: string, encrypted_cookie: string, iv: string, auth_tag: string }} params
+ */
+function setAutobuyConfig(params) {
+  stmts.setAutobuyConfig.run(params);
+}
+
+/**
+ * Get the encrypted autobuy config for a user.
+ * @param {string} user_id
+ * @returns {{ encrypted_cookie: string, iv: string, auth_tag: string } | null}
+ */
+function getAutobuyConfig(user_id) {
+  return stmts.getAutobuyConfig.get({ user_id }) || null;
+}
+
+/**
+ * Delete the autobuy config for a user.
+ * @param {string} user_id
+ * @returns {number} rows deleted
+ */
+function deleteAutobuyConfig(user_id) {
+  return stmts.deleteAutobuyConfig.run({ user_id }).changes;
+}
+
+/**
+ * Check if a user has an autobuy config set.
+ * @param {string} user_id
+ * @returns {boolean}
+ */
+function hasAutobuyConfig(user_id) {
+  return !!stmts.hasAutobuyConfig.get({ user_id });
+}
+
 module.exports = {
   addSubscription,
   removeSubscription,
@@ -283,4 +354,9 @@ module.exports = {
   findShopSubscription,
   getShopSnapshot,
   upsertShopSnapshot,
+  // autobuy
+  setAutobuyConfig,
+  getAutobuyConfig,
+  deleteAutobuyConfig,
+  hasAutobuyConfig,
 };

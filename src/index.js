@@ -15,6 +15,8 @@ const {
   serializeSnapshot,
   deserializeSnapshot,
 } = require('./shop-scraper');
+const { buyProduct }   = require('./shop-buyer');
+const { decryptCookie } = require('./crypto-utils');
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -263,11 +265,34 @@ function startShopScraperLoop() {
           const subs = db.getShopSubsForCategory(categoryUrl);
           for (const restock of restocks) {
             for (const sub of subs) {
+              // ── Auto-buy: attempt purchase if user configured a cookie ──
+              let autobuyResult = null;
+              const autobuyConfig = db.getAutobuyConfig(sub.user_id);
+
+              if (autobuyConfig) {
+                const plainCookie = decryptCookie({
+                  encrypted: autobuyConfig.encrypted_cookie,
+                  iv:        autobuyConfig.iv,
+                  authTag:   autobuyConfig.auth_tag,
+                });
+
+                if (plainCookie) {
+                  console.log(`[shop] [auto-buy] Attempting purchase for user=${sub.user_id} handle=${restock.handle}`);
+                  autobuyResult = await buyProduct(plainCookie, restock.handle);
+                  console.log(`[shop] [auto-buy] Result for ${restock.handle}:`, autobuyResult.success ? '✅ success' : `❌ ${autobuyResult.error}`);
+                } else {
+                  console.warn(`[shop] [auto-buy] Cookie decryption failed for user=${sub.user_id}, skipping auto-buy.`);
+                  autobuyResult = { success: false, error: 'Cookie 解密失敗，請重新設定 `/shop-autobuy setup`' };
+                }
+              }
+
               allRestockMatches.push({
                 restock,
                 categoryUrl,
-                targetId:   sub.target_id,
-                targetType: sub.target_type,
+                targetId:     sub.target_id,
+                targetType:   sub.target_type,
+                userId:       sub.user_id,
+                autobuyResult,
               });
             }
           }

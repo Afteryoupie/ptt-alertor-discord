@@ -22,12 +22,13 @@ function buildArticleEmbed(article, board, matchType, matchValue) {
  * Build a Discord embed for a shop restock event.
  * @param {{ handle, title, url, previousQty, currentQty, sku, isNewProduct }} restock
  * @param {string} categoryUrl
+ * @param {{ success: boolean, orderId?: string, orderUrl?: string, variantTitle?: string, price?: string, error?: string } | null} autobuyResult
  */
-function buildRestockEmbed(restock, categoryUrl) {
+function buildRestockEmbed(restock, categoryUrl, autobuyResult = null) {
   const qtyText = restock.currentQty > 0 ? `${restock.currentQty} 件` : '有貨';
   const label = restock.isNewProduct ? '🆕 新商品上架' : '🔔 補貨通知';
 
-  return new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setColor(restock.isNewProduct ? 0xf5a623 : 0x2ecc71)
     .setTitle(`${label}｜${restock.title}`)
     .setURL(restock.url)
@@ -37,6 +38,38 @@ function buildRestockEmbed(restock, categoryUrl) {
     )
     .setFooter({ text: `Funbox Shop • ${categoryUrl}` })
     .setTimestamp();
+
+  // Append auto-buy result if present
+  if (autobuyResult !== null) {
+    if (autobuyResult.success) {
+      const orderInfo = autobuyResult.orderUrl
+        ? `[訂單 ${autobuyResult.orderId}](${autobuyResult.orderUrl})`
+        : `訂單 ${autobuyResult.orderId}`;
+      embed.addFields({
+        name: '🤖 自動購買結果',
+        value: [
+          `✅ **購買成功！**`,
+          `📦 規格：${autobuyResult.variantTitle || ''}`,
+          `💰 失費：$${autobuyResult.price || ''}`,
+          `📋 ${orderInfo}`,
+        ].join('\n'),
+        inline: false,
+      });
+      embed.setColor(0x1d6fa5); // blue: purchase succeeded
+    } else {
+      embed.addFields({
+        name: '🤖 自動購買結果',
+        value: [
+          `❌ **購買失敗**`,
+          `原因：${autobuyResult.error || '未知錯誤'}`,
+          `🔗 [請手動前往購買](${restock.url})`,
+        ].join('\n'),
+        inline: false,
+      });
+    }
+  }
+
+  return embed;
 }
 
 /**
@@ -137,7 +170,7 @@ async function sendRestockNotifications(client, matches) {
       for (let i = 0; i < items.length; i += MAX_EMBEDS) {
         const chunk = items.slice(i, i + MAX_EMBEDS);
         const embeds = chunk.map(m =>
-          buildRestockEmbed(m.restock, m.categoryUrl)
+          buildRestockEmbed(m.restock, m.categoryUrl, m.autobuyResult ?? null)
         );
         await sendable.send({ embeds });
         if (i + MAX_EMBEDS < items.length) await sleep(50);
