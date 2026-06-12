@@ -64,10 +64,29 @@ db.exec(`
     encrypted_cookie TEXT NOT NULL,
     iv               TEXT NOT NULL,
     auth_tag         TEXT NOT NULL,
+    name             TEXT,
+    email            TEXT,
+    phone            TEXT,
+    seven_store_id   TEXT DEFAULT '962380',
+    seven_store_name TEXT DEFAULT '大五股門市',
+    seven_store_addr TEXT DEFAULT '大五股門市(新北市五股區成泰路二段81號)',
     created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
+
+// Safe migration: add new columns to existing DBs
+const profileColumns = [
+  ['name',             'TEXT'],
+  ['email',            'TEXT'],
+  ['phone',            'TEXT'],
+  ['seven_store_id',   "TEXT DEFAULT '962380'"],
+  ['seven_store_name', "TEXT DEFAULT '大五股門市'"],
+  ['seven_store_addr', "TEXT DEFAULT '大五股門市(新北市五股區成泰路二段81號)'"],
+];
+for (const [col, type] of profileColumns) {
+  try { db.exec(`ALTER TABLE autobuy_configs ADD COLUMN ${col} ${type}`); } catch (_) {}
+}
 
 // ─── Prepared Statements ────────────────────────────────────────────────────
 
@@ -171,7 +190,19 @@ const stmts = {
   `),
 
   getAutobuyConfig: db.prepare(`
-    SELECT encrypted_cookie, iv, auth_tag FROM autobuy_configs WHERE user_id = @user_id
+    SELECT encrypted_cookie, iv, auth_tag, name, email, phone,
+           seven_store_id, seven_store_name, seven_store_addr
+    FROM autobuy_configs WHERE user_id = @user_id
+  `),
+
+  setAutobuyProfile: db.prepare(`
+    UPDATE autobuy_configs
+    SET name = @name, email = @email, phone = @phone,
+        seven_store_id   = @seven_store_id,
+        seven_store_name = @seven_store_name,
+        seven_store_addr = @seven_store_addr,
+        updated_at       = CURRENT_TIMESTAMP
+    WHERE user_id = @user_id
   `),
 
   deleteAutobuyConfig: db.prepare(`
@@ -310,6 +341,14 @@ function setAutobuyConfig(params) {
 }
 
 /**
+ * Update checkout profile fields for a user.
+ * @param {{ user_id, name, email, phone, seven_store_id, seven_store_name, seven_store_addr }} params
+ */
+function setAutobuyProfile(params) {
+  stmts.setAutobuyProfile.run(params);
+}
+
+/**
  * Get the encrypted autobuy config for a user.
  * @param {string} user_id
  * @returns {{ encrypted_cookie: string, iv: string, auth_tag: string } | null}
@@ -356,6 +395,7 @@ module.exports = {
   upsertShopSnapshot,
   // autobuy
   setAutobuyConfig,
+  setAutobuyProfile,
   getAutobuyConfig,
   deleteAutobuyConfig,
   hasAutobuyConfig,

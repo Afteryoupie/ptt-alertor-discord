@@ -55,6 +55,26 @@ module.exports = {
       sub
         .setName('test')
         .setDescription('測試目前儲存的 Cookie 是否仍然有效')
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('profile')
+        .setDescription('設定結帳資訊（姓名、Email、手機）— 需先執行 setup')
+        .addStringOption(opt =>
+          opt.setName('name').setDescription('購買人姓名').setRequired(true)
+        )
+        .addStringOption(opt =>
+          opt.setName('email').setDescription('電子郵件').setRequired(true)
+        )
+        .addStringOption(opt =>
+          opt.setName('phone').setDescription('手機號碼（從0開頭）').setRequired(true)
+        )
+        .addStringOption(opt =>
+          opt.setName('store_id').setDescription('7-Eleven 門市代碼（預設:962380 大五股）').setRequired(false)
+        )
+        .addStringOption(opt =>
+          opt.setName('store_name').setDescription('7-Eleven 門市名稱（預設:大五股門市）').setRequired(false)
+        )
     ),
 
   async execute(interaction) {
@@ -209,5 +229,47 @@ module.exports = {
         });
       }
     }
+
+    // ── PROFILE ──────────────────────────────────────────────────────
+    if (sub === 'profile') {
+      if (!db.hasAutobuyConfig(userId)) {
+        return interaction.reply({
+          content: '⚠️ 請先執行 `/shop-autobuy setup <cookie>` 設定 Cookie，再設定結帳資訊。',
+          flags: [MessageFlags.Ephemeral],
+        });
+      }
+
+      const name      = interaction.options.getString('name',  true).trim();
+      const email     = interaction.options.getString('email', true).trim();
+      const phone     = interaction.options.getString('phone', true).trim();
+      const storeId   = (interaction.options.getString('store_id')   || '962380').trim();
+      const storeName = (interaction.options.getString('store_name') || '大五股門市').trim();
+      const storeAddr = `${storeName}(新北市五股區成泰路二段81號)`;
+
+      db.setAutobuyProfile({
+        user_id:          userId,
+        name,
+        email,
+        phone,
+        seven_store_id:   storeId,
+        seven_store_name: storeName,
+        seven_store_addr: storeAddr,
+      });
+
+      return interaction.reply({
+        content: [
+          '✅ **結帳資訊已儲存！**',
+          '',
+          `👤 姓名：${name}`,
+          `📧 Email：${email}`,
+          `📱 手機：${phone}`,
+          `🏦 7-Eleven：${storeName}（代碼 ${storeId}）`,
+          '',
+          '自動購買觸發時會使用以上資訊進行超商取貨付款結帳。',
+        ].join('\n'),
+        flags: [MessageFlags.Ephemeral],
+      });
+    }
   },
 };
+

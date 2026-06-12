@@ -290,7 +290,14 @@ function startShopScraperLoop() {
 
                 if (plainCookie) {
                   console.log(`[shop] [auto-buy] Attempting purchase for user=${sub.user_id} handle=${restock.handle}`);
-                  autobuyResult = await buyProduct(plainCookie, restock.handle);
+                  autobuyResult = await buyProduct(plainCookie, restock.handle, {
+                    name:             autobuyConfig.name,
+                    email:            autobuyConfig.email,
+                    phone:            autobuyConfig.phone,
+                    seven_store_id:   autobuyConfig.seven_store_id,
+                    seven_store_name: autobuyConfig.seven_store_name,
+                    seven_store_addr: autobuyConfig.seven_store_addr,
+                  });
                   console.log(`[shop] [auto-buy] Result for ${restock.handle}:`, autobuyResult.success ? '✅ success' : `❌ ${autobuyResult.error}`);
                 } else {
                   console.warn(`[shop] [auto-buy] Cookie decryption failed for user=${sub.user_id}, skipping auto-buy.`);
