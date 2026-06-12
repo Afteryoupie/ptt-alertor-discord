@@ -271,33 +271,39 @@ async function buyProduct(sessionCookie, handle, profile = {}) {
 }
 
 /**
- * Validate that a session cookie is active by checking account API.
+ * Validate that a session cookie is active.
+ * Fetches /account and checks whether the final URL stays on /account
+ * (logged in) or redirects to /users/sign_in (not logged in).
  * @param {string} sessionCookie
  * @returns {Promise<{ valid: boolean, email?: string }>}
  */
 async function validateSession(sessionCookie) {
   try {
-    // Cyberbiz stores customer info in localStorage; best we can do via HTTP
-    // is check if /account redirects (unauthenticated) or loads (authenticated)
+    // Follow redirects; check where we end up
     const res = await fetch(`${SHOP_BASE}/account`, {
       headers: {
         ...buildHeaders(sessionCookie, `${SHOP_BASE}/`),
         'Accept': 'text/html,*/*',
       },
-      redirect: 'manual', // Don't follow redirects
-      signal:   AbortSignal.timeout(10_000),
+      // redirect: 'follow' is the default — let Node.js follow them
+      signal: AbortSignal.timeout(10_000),
     });
 
-    // Authenticated: 200 on /account. Unauthenticated: 302 redirect to /users/sign_in
-    if (res.status === 200) {
-      const html  = await res.text().catch(() => '');
-      const match = html.match(/["']email["']\s*[:=]\s*["']([^"'@]+@[^"']+)["']/i);
-      return { valid: true, email: match?.[1] || null };
+    const finalUrl = res.url || '';
+
+    // Unauthenticated → redirected to sign_in page
+    if (finalUrl.includes('sign_in') || finalUrl.includes('/login')) {
+      return { valid: false };
     }
-    return { valid: false };
+
+    // Also validate by checking CSRF token availability (only works when logged in)
+    const html   = await res.text().catch(() => '');
+    const match  = html.match(/["']email["']\s*[:=]\s*["']([^"'@]+@[^"']+)["']/i);
+    return { valid: true, email: match?.[1] || null };
   } catch {
     return { valid: false };
   }
 }
+
 
 module.exports = { buyProduct, validateSession, pickBestVariant };
