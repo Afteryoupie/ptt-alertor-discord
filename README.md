@@ -46,7 +46,31 @@ npm start
 ### 🛒 Funbox 商店補貨追蹤
 - `/shop-watch add <url>` - 新增補貨追蹤。輸入 Funbox 商品分類頁面網址，當該分類有商品從缺貨變為有貨時發送通知。
 - `/shop-watch list` - 列出此頻道/私訊目前的補貨追蹤訂閱。
-- `/shop-watch remove <id>` - 依據 ID（可從 `/shop-watch list` 查詢）移除補貨追蹤。
+- `/shop-watch remove <id>` - 依據 ID 移除補貨追蹤。
+
+### 🤖 Funbox 自動購買 (Auto-buy)
+- `/shop-autobuy setup` - 設定自動購買功能，綁定 Funbox 帳號與 7-11 取貨門市（需有庫存快照與設定 Cookie 加密密鑰）。
+- `/shop-autobuy test` - 測試自動購買設定是否正確（模擬結帳流程但不送出訂單）。
+- `/shop-autobuy status` - 查看自動購買設定狀態。
+- `/shop-autobuy remove` - 移除自動購買設定與綁定資料。
+
+### 🏬 誠品線上展覽追蹤
+- `/eslite-watch add <url>` - 新增誠品展覽追蹤。輸入誠品展覽網址，當展覽內有商品從缺貨變為有貨、或新商品上架時發送通知。
+- `/eslite-watch list` - 列出此頻道/私訊目前的誠品追蹤訂閱。
+- `/eslite-watch remove <id>` - 依據 ID 移除誠品展覽追蹤。
+
+### 🛍️ momo 購物網補貨追蹤
+- `/momo-watch add <url>` - 新增 momo 購物網分類追蹤。當該分類內有商品補貨或即將開賣時發送通知。
+- `/momo-watch list` - 列出此頻道/私訊目前的 momo 追蹤訂閱。
+- `/momo-watch remove <id>` - 依據 ID 移除 momo 追蹤。
+
+### ⚙️ 系統設定 (限伺服器管理員)
+- `/config interval-set` - 設定特定掃描器（PTT/Funbox/誠品/momo）的輪詢間隔時間 (1-60 分鐘)。
+- `/config interval-get` - 查看所有掃描器的輪詢間隔設定。
+- `/config interval-reset` - 重設特定掃描器的輪詢間隔為環境變數預設值。
+- `/config hours-set` - 設定特定掃描器的運作時間 (24小時制，設定 0-24 即可全天運作)。
+- `/config hours-get` - 查看所有掃描器的運作時間設定。
+- `/config hours-reset` - 重設特定掃描器的運作時間為預設值 (10:00 - 19:00)。
 
 ## 💡 進階用法與特性
 
