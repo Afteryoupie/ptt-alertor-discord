@@ -66,8 +66,7 @@ function getCurrentInterval(cfg) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('config')
-    .setDescription('設定 Bot 運作參數（需要管理員權限）')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDescription('設定 Bot 運作參數')
     .addSubcommand(sub =>
       sub
         .setName('interval-set')
@@ -172,13 +171,6 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    // 只允許在伺服器中使用（DM 無 guild 管理員概念）
-    if (!interaction.guildId) {
-      return interaction.reply({
-        content: '❌ 此指令只能在伺服器頻道中使用。',
-        flags: [MessageFlags.Ephemeral],
-      });
-    }
 
     const sub = interaction.options.getSubcommand();
 
