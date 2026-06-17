@@ -50,7 +50,7 @@ function buildRestockEmbed(restock, categoryUrl, autobuyResult = null) {
         value: [
           `✅ **購買成功！**`,
           `📦 規格：${autobuyResult.variantTitle || ''}`,
-          `💰 失費：$${autobuyResult.price || ''}`,
+          `💰 費用：$${autobuyResult.price || ''}`,
           `📋 ${orderInfo}`,
         ].join('\n'),
         inline: false,
@@ -73,60 +73,63 @@ function buildRestockEmbed(restock, categoryUrl, autobuyResult = null) {
 }
 
 /**
- * Send notifications for a batch of matched articles to their targets.
- * Groups by target to send as few API calls as possible.
- *
- * @param {import('discord.js').Client} client
- * @param {Array<{ article, board, matchType, matchValue, targetId, targetType }>} matches
+ * Build a Discord embed for an Eslite exhibition restock event.
+ * @param {{ guid, name, url, prevStock, currStock, status, isNewProduct }} restock
+ * @param {string} exhibitionId
  */
-async function sendNotifications(client, matches) {
-  if (!matches.length) return;
+function buildEsliteRestockEmbed(restock, exhibitionId) {
+  const stockLabel = restock.currStock === -1 ? '補貨中（可訂購）' : `${restock.currStock} 件`;
+  const label = restock.isNewProduct ? '🆕 新商品上架' : '🔔 補貨通知';
+  const exhibitionLink = `https://www.eslite.com/exhibitions/${exhibitionId}`;
 
-  // Group matches by targetId
-  const byTarget = new Map();
-  for (const m of matches) {
-    if (!byTarget.has(m.targetId)) byTarget.set(m.targetId, []);
-    byTarget.get(m.targetId).push(m);
-  }
+  return new EmbedBuilder()
+    .setColor(restock.isNewProduct ? 0xf5a623 : 0x2ecc71)
+    .setTitle(`${label}｜${restock.name}`)
+    .setURL(restock.url)
+    .addFields(
+      { name: '目前庫存', value: stockLabel, inline: true },
+      { name: '直接購買', value: `[點此前往商品頁](${restock.url})`, inline: true },
+    )
+    .setFooter({ text: `誠品線上 • ${exhibitionId}` })
+    .setTimestamp();
+}
 
-  for (const [targetId, items] of byTarget) {
-    try {
-      // Resolve channel or DM
-      let sendable;
-      const firstItem = items[0];
+/**
+ * Build a Discord embed for a momo restock / on-sale / coming-soon event.
+ * @param {{ goodsCode, name, url, stock, onSaleDescription, status, prevStatus, eventType }} event
+ * @param {string} categoryUrl
+ */
+function buildMomoRestockEmbed(event, categoryUrl) {
+  const EVENT_LABELS = {
+    restock:     '🔔 momo 補貨通知',
+    on_sale:     '🚀 momo 正式開賣！',
+    coming_soon: '⏳ momo 即將開賣公告',
+    new_product: '🆕 momo 新商品上架',
+  };
+  const EVENT_COLORS = {
+    restock:     0x2ecc71,   // green
+    on_sale:     0xe74c3c,   // red (urgent)
+    coming_soon: 0xf5a623,   // orange
+    new_product: 0x9b59b6,   // purple
+  };
 
-      if (firstItem.targetType === 'channel') {
-        sendable = await client.channels.fetch(targetId).catch(() => null);
-      } else {
-        // DM: fetch user then create DM channel
-        const user = await client.users.fetch(targetId).catch(() => null);
-        if (user) sendable = await user.createDM().catch(() => null);
-      }
+  const label = EVENT_LABELS[event.eventType] || '🔔 momo 通知';
+  const color = EVENT_COLORS[event.eventType] || 0x2ecc71;
 
-      if (!sendable) {
-        console.warn(`[notifier] Cannot resolve target ${targetId}, skipping`);
-        continue;
-      }
+  const stockValue = event.status === 'coming_soon'
+    ? `即將開賣：${event.onSaleDescription || '(時間待確認)'}`
+    : (event.stock > 0 ? `${event.stock} 件` : '有貨');
 
-      // Batch: split into groups of 10 embeds (Discord limit per message)
-      const MAX_EMBEDS = 10;
-      for (let i = 0; i < items.length; i += MAX_EMBEDS) {
-        const chunk = items.slice(i, i + MAX_EMBEDS);
-        const embeds = chunk.map(m =>
-          buildArticleEmbed(m.article, m.board, m.matchType, m.matchValue)
-        );
-
-        await sendable.send({ embeds });
-
-        // Polite rate-limit buffer between batches (50ms)
-        if (i + MAX_EMBEDS < items.length) {
-          await sleep(50);
-        }
-      }
-    } catch (err) {
-      console.error(`[notifier] Failed to send to ${targetId}:`, err.message);
-    }
-  }
+  return new EmbedBuilder()
+    .setColor(color)
+    .setTitle(`${label}｜${event.name}`)
+    .setURL(event.url)
+    .addFields(
+      { name: '狀態', value: stockValue, inline: true },
+      { name: '直接購買', value: `[點此前往商品頁](${event.url})`, inline: true },
+    )
+    .setFooter({ text: `momo 購物網 • ${categoryUrl}` })
+    .setTimestamp();
 }
 
 function sleep(ms) {
@@ -134,15 +137,41 @@ function sleep(ms) {
 }
 
 /**
- * Send shop restock notifications for a batch of restock events to their targets.
- *
- * @param {import('discord.js').Client} client
- * @param {Array<{ restock, categoryUrl, targetId, targetType }>} matches
+ * Resolve a Discord sendable (channel or DM) from a targetId/targetType.
+ * @returns {Promise<import('discord.js').TextChannel|import('discord.js').DMChannel|null>}
  */
-async function sendRestockNotifications(client, matches) {
+async function resolveSendable(client, targetId, targetType) {
+  if (targetType === 'channel') {
+    return client.channels.fetch(targetId).catch(() => null);
+  }
+  const user = await client.users.fetch(targetId).catch(() => null);
+  return user ? user.createDM().catch(() => null) : null;
+}
+
+/**
+ * Send a batch of Discord embeds to a resolved target, chunked at 10.
+ * @param {object} sendable  Discord channel/DM
+ * @param {import('discord.js').EmbedBuilder[]} embeds
+ */
+async function sendEmbeds(sendable, embeds) {
+  const MAX = 10;
+  for (let i = 0; i < embeds.length; i += MAX) {
+    await sendable.send({ embeds: embeds.slice(i, i + MAX) });
+    if (i + MAX < embeds.length) await sleep(50);
+  }
+}
+
+/**
+ * Generic notification dispatcher.
+ * @param {import('discord.js').Client} client
+ * @param {Array<object>} matches  each must have targetId, targetType
+ * @param {function(object): import('discord.js').EmbedBuilder} buildEmbed  called per match
+ * @param {string} logTag  e.g. '[notifier]'
+ */
+async function sendMatchNotifications(client, matches, buildEmbed, logTag = '[notifier]') {
   if (!matches.length) return;
 
-  // Group matches by targetId
+  // Group by targetId
   const byTarget = new Map();
   for (const m of matches) {
     if (!byTarget.has(m.targetId)) byTarget.set(m.targetId, []);
@@ -151,34 +180,52 @@ async function sendRestockNotifications(client, matches) {
 
   for (const [targetId, items] of byTarget) {
     try {
-      let sendable;
-      const firstItem = items[0];
-
-      if (firstItem.targetType === 'channel') {
-        sendable = await client.channels.fetch(targetId).catch(() => null);
-      } else {
-        const user = await client.users.fetch(targetId).catch(() => null);
-        if (user) sendable = await user.createDM().catch(() => null);
-      }
-
+      const sendable = await resolveSendable(client, targetId, items[0].targetType);
       if (!sendable) {
-        console.warn(`[notifier] Cannot resolve target ${targetId}, skipping`);
+        console.warn(`${logTag} Cannot resolve target ${targetId}, skipping`);
         continue;
       }
-
-      const MAX_EMBEDS = 10;
-      for (let i = 0; i < items.length; i += MAX_EMBEDS) {
-        const chunk = items.slice(i, i + MAX_EMBEDS);
-        const embeds = chunk.map(m =>
-          buildRestockEmbed(m.restock, m.categoryUrl, m.autobuyResult ?? null)
-        );
-        await sendable.send({ embeds });
-        if (i + MAX_EMBEDS < items.length) await sleep(50);
-      }
+      await sendEmbeds(sendable, items.map(buildEmbed));
     } catch (err) {
-      console.error(`[notifier] Failed to send restock to ${targetId}:`, err.message);
+      console.error(`${logTag} Failed to send to ${targetId}:`, err.message);
     }
   }
 }
 
-module.exports = { sendNotifications, sendRestockNotifications };
+/** Send PTT article notifications. */
+function sendNotifications(client, matches) {
+  return sendMatchNotifications(
+    client, matches,
+    m => buildArticleEmbed(m.article, m.board, m.matchType, m.matchValue),
+    '[notifier]'
+  );
+}
+
+/** Send Funbox shop restock notifications. */
+function sendRestockNotifications(client, matches) {
+  return sendMatchNotifications(
+    client, matches,
+    m => buildRestockEmbed(m.restock, m.categoryUrl, m.autobuyResult ?? null),
+    '[notifier]'
+  );
+}
+
+/** Send Eslite exhibition restock notifications. */
+function sendEsliteRestockNotifications(client, matches) {
+  return sendMatchNotifications(
+    client, matches,
+    m => buildEsliteRestockEmbed(m.restock, m.exhibitionId),
+    '[notifier]'
+  );
+}
+
+/** Send Momo category restock / on-sale / coming-soon notifications. */
+function sendMomoRestockNotifications(client, matches) {
+  return sendMatchNotifications(
+    client, matches,
+    m => buildMomoRestockEmbed(m.event, m.categoryUrl),
+    '[momo]'
+  );
+}
+
+module.exports = { sendNotifications, sendRestockNotifications, sendEsliteRestockNotifications, sendMomoRestockNotifications };

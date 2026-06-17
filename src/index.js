@@ -8,22 +8,43 @@ const fs   = require('fs');
 
 const db                  = require('./database');
 const { crawlBoard, matchKeyword, matchAuthor } = require('./scraper');
-const { sendNotifications, sendRestockNotifications } = require('./notifier');
+const { sendNotifications, sendRestockNotifications, sendEsliteRestockNotifications, sendMomoRestockNotifications } = require('./notifier');
 const {
   snapshotCategory,
   detectRestocks,
   serializeSnapshot,
   deserializeSnapshot,
 } = require('./shop-scraper');
+const {
+  snapshotExhibition,
+  detectRestocks: detectEsliteRestocks,
+  serializeSnapshot: serializeEsliteSnapshot,
+  deserializeSnapshot: deserializeEsliteSnapshot,
+  exhibitionUrl,
+} = require('./eslite-scraper');
+const {
+  parseCategoryInput,
+  categoryUrl: momoCategoryUrl,
+  snapshotCategory: snapshotMomoCategory,
+  detectRestocks: detectMomoRestocks,
+  serializeSnapshot: serializeMomoSnapshot,
+  deserializeSnapshot: deserializeMomoSnapshot,
+} = require('./momo-scraper');
 const { buyProduct }   = require('./shop-buyer');
 const { decryptCookie } = require('./crypto-utils');
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
-const TOKEN          = process.env.DISCORD_TOKEN;
-const POLL_INTERVAL  = parseInt(process.env.POLL_INTERVAL_MS   || '300000', 10); // 5 min
-const COOLDOWN_MS    = parseInt(process.env.COOLDOWN_MS         || '5000',   10); // 5s between boards
-const SHOP_POLL_INTERVAL = parseInt(process.env.SHOP_POLL_INTERVAL_MS || '300000', 10); // 5 min
+const TOKEN        = process.env.DISCORD_TOKEN;
+const COOLDOWN_MS  = parseInt(process.env.COOLDOWN_MS || '5000', 10); // 5s between boards
+
+// ENV fallback defaults (used when DB has no override)
+const ENV_INTERVALS = {
+  poll_interval_ms:        parseInt(process.env.POLL_INTERVAL_MS        || '300000', 10),
+  shop_poll_interval_ms:   parseInt(process.env.SHOP_POLL_INTERVAL_MS   || '300000', 10),
+  eslite_poll_interval_ms: parseInt(process.env.ESLITE_POLL_INTERVAL_MS || '300000', 10),
+  momo_poll_interval_ms:   parseInt(process.env.MOMO_POLL_INTERVAL_MS   || '300000', 10),
+};
 
 if (!TOKEN) {
   console.error('[startup] ❌ DISCORD_TOKEN is not set. Please create a .env file.');
@@ -56,10 +77,17 @@ for (const file of fs.readdirSync(commandsDir).filter(f => f.endsWith('.js'))) {
 
 client.once('clientReady', () => {
   console.log(`[startup] ✅ Logged in as ${client.user.tag}`);
-  console.log(`[startup] 🕒 Poll interval: ${POLL_INTERVAL / 1000}s`);
-  console.log(`[startup] 🛒 Shop poll interval: ${SHOP_POLL_INTERVAL / 1000}s`);
+  
+  const getOpHours = (key) => `${db.getSetting(key + '_op_hour_start') || '10'}:00-${db.getSetting(key + '_op_hour_end') || '19'}:00`;
+
+  console.log(`[startup] 🕒 PTT interval:    ${db.getIntervalMs('poll_interval_ms',        ENV_INTERVALS.poll_interval_ms) / 1000}s (${getOpHours('ptt')})`);
+  console.log(`[startup] 🛒 Shop interval:   ${db.getIntervalMs('shop_poll_interval_ms',   ENV_INTERVALS.shop_poll_interval_ms) / 1000}s (${getOpHours('shop')})`);
+  console.log(`[startup] 🏬 Eslite interval: ${db.getIntervalMs('eslite_poll_interval_ms', ENV_INTERVALS.eslite_poll_interval_ms) / 1000}s (${getOpHours('eslite')})`);
+  console.log(`[startup] 🛍️  Momo interval:  ${db.getIntervalMs('momo_poll_interval_ms',   ENV_INTERVALS.momo_poll_interval_ms) / 1000}s (${getOpHours('momo')})`);
   startScraperLoop();
   startShopScraperLoop();
+  startEsliteScraperLoop();
+  startMomoScraperLoop();
 });
 
 client.on('interactionCreate', async interaction => {
@@ -111,8 +139,8 @@ function startScraperLoop() {
       return;
     }
 
-    if (!isWithinOperatingHours()) {
-      console.log(`[scraper] ⏰ 目前非營業時間（10:00–19:00 台灣時間），跳過循環。`);
+    if (!isWithinOperatingHours('ptt')) {
+      console.log(`[ptt] ⏰ 目前非設定的營業時間，跳過循環。`);
       return;
     }
 
@@ -199,9 +227,16 @@ function startScraperLoop() {
     }
   }
 
-  // Run immediately on start, then every POLL_INTERVAL
-  tick();
-  setInterval(tick, POLL_INTERVAL);
+  // Dynamic setTimeout: re-reads interval from DB after every tick.
+  // This allows /config interval-set to take effect without restarting the bot.
+  async function schedule() {
+    await tick();
+    const interval = db.getIntervalMs('poll_interval_ms', ENV_INTERVALS.poll_interval_ms);
+    console.log(`[scraper] ⏳ 下次掃描於 ${interval / 1000}s 後。`);
+    setTimeout(schedule, interval);
+  }
+
+  schedule();
 }
 
 // ─── Shop Restock Scraper Loop ────────────────────────────────────────────────
@@ -223,8 +258,8 @@ function startShopScraperLoop() {
       return;
     }
 
-    if (!isWithinOperatingHours()) {
-      console.log(`[shop] ⏰ 目前非營業時間（10:00–19:00 台灣時間），跳過循璳。`);
+    if (!isWithinOperatingHours('shop')) {
+      console.log(`[shop] ⏰ 目前非設定的營業時間，跳過循環。`);
       return;
     }
 
@@ -336,8 +371,233 @@ function startShopScraperLoop() {
     }
   }
 
-  tick();
-  setInterval(tick, SHOP_POLL_INTERVAL);
+  async function schedule() {
+    await tick();
+    const interval = db.getIntervalMs('shop_poll_interval_ms', ENV_INTERVALS.shop_poll_interval_ms);
+    console.log(`[shop] ⏳ 下次掃描於 ${interval / 1000}s 後。`);
+    setTimeout(schedule, interval);
+  }
+
+  schedule();
+}
+
+// ─── Eslite Exhibition Restock Scraper Loop ───────────────────────────────────
+
+/**
+ * Core eslite exhibition restock loop:
+ * 1. Fetch all subscribed eslite exhibition IDs (distinct)
+ * 2. For each exhibition: fetch current inventory snapshot from Eslite API
+ * 3. Compare against stored snapshot to detect restocks
+ * 4. Notify subscribed channels/DMs and save updated snapshot
+ * 5. Wait ESLITE_POLL_INTERVAL ms, then repeat
+ */
+function startEsliteScraperLoop() {
+  let running = false;
+
+  async function tick() {
+    if (running) {
+      console.warn('[eslite] Previous cycle still running, skipping tick.');
+      return;
+    }
+
+    if (!isWithinOperatingHours('eslite')) {
+      console.log(`[eslite] ⏰ 目前非設定的營業時間，跳過循環。`);
+      return;
+    }
+
+    running = true;
+
+    try {
+      const exhibitions = db.getAllEsliteExhibitions();
+      if (!exhibitions.length) {
+        // No eslite subscriptions yet — silent
+        return;
+      }
+
+      console.log(`[eslite] === 開始掃描誠品展覽庫存 (${exhibitions.length} 個展覽) ===`);
+      const allRestockMatches = [];
+
+      for (const exhibitionId of exhibitions) {
+        try {
+          // Fetch fresh snapshot
+          const currSnapshot = await snapshotExhibition(exhibitionId);
+
+          // Load previous snapshot
+          const prevRaw = db.getEsliteSnapshot(exhibitionId);
+          const prevSnapshot = prevRaw ? deserializeEsliteSnapshot(prevRaw) : null;
+
+          if (!prevSnapshot) {
+            // First run: save baseline, no notifications
+            console.log(`[eslite] [${exhibitionId}] 首次掃描，儲存基準庫存快照。`);
+            db.upsertEsliteSnapshot(exhibitionId, serializeEsliteSnapshot(currSnapshot));
+            continue;
+          }
+
+          // Detect restocks
+          const restocks = detectEsliteRestocks(prevSnapshot, currSnapshot);
+
+          // Always update snapshot
+          db.upsertEsliteSnapshot(exhibitionId, serializeEsliteSnapshot(currSnapshot));
+
+          if (!restocks.length) {
+            console.log(`[eslite] [${exhibitionId}] 無補貨變動。`);
+            continue;
+          }
+
+          console.log(`[eslite] [${exhibitionId}] 發現 ${restocks.length} 筆補貨！`);
+
+          const subs = db.getEsliteSubsForExhibition(exhibitionId);
+          for (const restock of restocks) {
+            for (const sub of subs) {
+              allRestockMatches.push({
+                restock,
+                exhibitionId,
+                targetId:   sub.target_id,
+                targetType: sub.target_type,
+                userId:     sub.user_id,
+              });
+            }
+          }
+        } catch (err) {
+          console.error(`[eslite] Error checking ${exhibitionId}:`, err.message);
+        }
+
+        // Polite cooldown between exhibition requests
+        if (exhibitions.length > 1) await sleep(COOLDOWN_MS);
+      }
+
+      if (allRestockMatches.length) {
+        console.log(`[eslite] 🚀 發送 ${allRestockMatches.length} 則誠品補貨通知...`);
+        await sendEsliteRestockNotifications(client, allRestockMatches);
+      }
+
+      console.log(`[eslite] === 循環結束 (${new Date().toLocaleTimeString('zh-TW')}) ===`);
+    } catch (err) {
+      console.error('[eslite] Unexpected error in tick:', err);
+    } finally {
+      running = false;
+    }
+  }
+
+  async function schedule() {
+    await tick();
+    const interval = db.getIntervalMs('eslite_poll_interval_ms', ENV_INTERVALS.eslite_poll_interval_ms);
+    console.log(`[eslite] ⏳ 下次掃描於 ${interval / 1000}s 後。`);
+    setTimeout(schedule, interval);
+  }
+
+  schedule();
+}
+
+// ─── Momo Category Restock Scraper Loop ──────────────────────────────────────
+
+/**
+ * Core momo restock loop (runs 24/7 — momo restocks can happen at midnight):
+ * 1. Fetch all subscribed momo category URLs (distinct)
+ * 2. For each category: fetch current inventory snapshot via POST API (max 2 pages)
+ * 3. Compare against stored snapshot to detect restocks / coming-soon events
+ * 4. Notify subscribed channels/DMs and save updated snapshot
+ * 5. Wait MOMO_POLL_INTERVAL ms, then repeat
+ */
+function startMomoScraperLoop() {
+  let running = false;
+
+  async function tick() {
+    if (running) {
+      console.warn('[momo] Previous cycle still running, skipping tick.');
+      return;
+    }
+
+    if (!isWithinOperatingHours('momo')) {
+      console.log(`[momo] ⏰ 目前非設定的營業時間，跳過循環。`);
+      return;
+    }
+
+    running = true;
+
+    try {
+      const categories = db.getAllMomoCategories();
+      if (!categories.length) {
+        // No momo subscriptions yet — silent
+        return;
+      }
+
+      console.log(`[momo] === 開始掃描 momo 分類庫存 (${categories.length} 個分類) ===`);
+      const allEventMatches = [];
+
+      for (const categoryFullUrl of categories) {
+        try {
+          // Parse cateCode + cateType from the stored canonical URL
+          const { cateCode, cateType } = parseCategoryInput(categoryFullUrl);
+
+          // Fetch fresh snapshot (max 2 pages)
+          const currSnapshot = await snapshotMomoCategory(cateCode, cateType, 2);
+
+          // Load previous snapshot
+          const prevRaw = db.getMomoSnapshot(categoryFullUrl);
+          const prevSnapshot = prevRaw ? deserializeMomoSnapshot(prevRaw) : null;
+
+          if (!prevSnapshot) {
+            // First run: save baseline, no notifications
+            console.log(`[momo] [${categoryFullUrl}] 首次掃描，儲存基準庫存快照。`);
+            db.upsertMomoSnapshot(categoryFullUrl, serializeMomoSnapshot(currSnapshot));
+            continue;
+          }
+
+          // Detect events
+          const events = detectMomoRestocks(prevSnapshot, currSnapshot);
+
+          // Always update snapshot
+          db.upsertMomoSnapshot(categoryFullUrl, serializeMomoSnapshot(currSnapshot));
+
+          if (!events.length) {
+            console.log(`[momo] [${categoryFullUrl}] 無變動。`);
+            continue;
+          }
+
+          console.log(`[momo] [${categoryFullUrl}] 發現 ${events.length} 筆事件！`);
+
+          const subs = db.getMomoSubsForCategory(categoryFullUrl);
+          for (const event of events) {
+            for (const sub of subs) {
+              allEventMatches.push({
+                event,
+                categoryUrl: categoryFullUrl,
+                targetId:    sub.target_id,
+                targetType:  sub.target_type,
+                userId:      sub.user_id,
+              });
+            }
+          }
+        } catch (err) {
+          console.error(`[momo] Error checking ${categoryFullUrl}:`, err.message);
+        }
+
+        // Polite cooldown between category requests
+        if (categories.length > 1) await sleep(COOLDOWN_MS);
+      }
+
+      if (allEventMatches.length) {
+        console.log(`[momo] 🚀 發送 ${allEventMatches.length} 則 momo 通知...`);
+        await sendMomoRestockNotifications(client, allEventMatches);
+      }
+
+      console.log(`[momo] === 循環結束 (${new Date().toLocaleTimeString('zh-TW')}) ===`);
+    } catch (err) {
+      console.error('[momo] Unexpected error in tick:', err);
+    } finally {
+      running = false;
+    }
+  }
+
+  async function schedule() {
+    await tick();
+    const interval = db.getIntervalMs('momo_poll_interval_ms', ENV_INTERVALS.momo_poll_interval_ms);
+    console.log(`[momo] ⏳ 下次掃描於 ${interval / 1000}s 後。`);
+    setTimeout(schedule, interval);
+  }
+
+  schedule();
 }
 
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
@@ -359,12 +619,21 @@ function sleep(ms) {
 
 /**
  * Returns true if current Taiwan time (Asia/Taipei) is within operating hours.
- * Operating hours: 10:00 – 19:00 (7 PM)
+ * Operating hours are configurable via /config hours-set
+ * Default for all scrapers is 10:00 - 19:00.
+ * @param {string} scraperKey
  * @returns {boolean}
  */
-function isWithinOperatingHours() {
+function isWithinOperatingHours(scraperKey) {
+  const defaultStart = '10';
+  const defaultEnd = '19';
+
+  const startHourStr = db.getSetting(`${scraperKey}_op_hour_start`) || defaultStart;
+  const endHourStr   = db.getSetting(`${scraperKey}_op_hour_end`) || defaultEnd;
+  const startHour    = parseInt(startHourStr, 10);
+  const endHour      = parseInt(endHourStr, 10);
+
   const now = new Date();
-  // Format hour in Taiwan timezone (UTC+8)
   const hour = parseInt(
     new Intl.DateTimeFormat('en-US', {
       timeZone: 'Asia/Taipei',
@@ -373,9 +642,16 @@ function isWithinOperatingHours() {
     }).format(now),
     10
   );
-  // Allow 10:00 (inclusive) through 18:xx (i.e. before 19:00)
-  return hour >= 10 && hour < 19;
+  
+  if (startHour <= endHour) {
+    // Normal range, e.g., 10 to 19 (inclusive of 10, up to 18:59)
+    return hour >= startHour && hour < endHour;
+  } else {
+    // Overnight range, e.g., 22 to 06
+    return hour >= startHour || hour < endHour;
+  }
 }
+
 
 client.login(TOKEN).catch(err => {
   console.error('[startup] ❌ Login failed:', err.message);

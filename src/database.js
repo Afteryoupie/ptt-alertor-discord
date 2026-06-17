@@ -58,6 +58,51 @@ db.exec(`
     updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Global bot settings (key-value store)
+  CREATE TABLE IF NOT EXISTS settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Eslite exhibition restock tracking
+  CREATE TABLE IF NOT EXISTS eslite_subscriptions (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        TEXT NOT NULL,
+    target_id      TEXT NOT NULL,
+    target_type    TEXT NOT NULL CHECK(target_type IN ('channel', 'dm')),
+    exhibition_id  TEXT NOT NULL,
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_eslite_subs_exhibition ON eslite_subscriptions(exhibition_id);
+  CREATE INDEX IF NOT EXISTS idx_eslite_subs_user       ON eslite_subscriptions(user_id);
+
+  CREATE TABLE IF NOT EXISTS eslite_snapshots (
+    exhibition_id TEXT PRIMARY KEY,
+    snapshot_json TEXT NOT NULL,
+    updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Momo category restock tracking
+  CREATE TABLE IF NOT EXISTS momo_subscriptions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      TEXT NOT NULL,
+    target_id    TEXT NOT NULL,
+    target_type  TEXT NOT NULL CHECK(target_type IN ('channel', 'dm')),
+    category_url TEXT NOT NULL,
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_momo_subs_category ON momo_subscriptions(category_url);
+  CREATE INDEX IF NOT EXISTS idx_momo_subs_user     ON momo_subscriptions(user_id);
+
+  CREATE TABLE IF NOT EXISTS momo_snapshots (
+    category_url  TEXT PRIMARY KEY,
+    snapshot_json TEXT NOT NULL,
+    updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- Auto-buy: encrypted session cookies per user
   CREATE TABLE IF NOT EXISTS autobuy_configs (
     user_id          TEXT PRIMARY KEY,
@@ -171,6 +216,114 @@ const stmts = {
 
   upsertShopSnapshot: db.prepare(`
     INSERT INTO shop_snapshots (category_url, snapshot_json, updated_at)
+    VALUES (@category_url, @snapshot_json, CURRENT_TIMESTAMP)
+    ON CONFLICT(category_url) DO UPDATE SET
+      snapshot_json = excluded.snapshot_json,
+      updated_at    = CURRENT_TIMESTAMP
+  `),
+
+  // ── Settings ─────────────────────────────────────────────────────────────
+
+  getSetting: db.prepare(`
+    SELECT value FROM settings WHERE key = @key
+  `),
+
+  setSetting: db.prepare(`
+    INSERT INTO settings (key, value, updated_at)
+    VALUES (@key, @value, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET
+      value      = excluded.value,
+      updated_at = CURRENT_TIMESTAMP
+  `),
+
+  getAllSettings: db.prepare(`
+    SELECT key, value, updated_at FROM settings ORDER BY key
+  `),
+
+  // ── Eslite restock ──────────────────────────────────────────────────────
+
+  addEsliteSubscription: db.prepare(`
+    INSERT INTO eslite_subscriptions (user_id, target_id, target_type, exhibition_id)
+    VALUES (@user_id, @target_id, @target_type, @exhibition_id)
+  `),
+
+  removeEsliteSubscription: db.prepare(`
+    DELETE FROM eslite_subscriptions WHERE id = @id AND user_id = @user_id
+  `),
+
+  listEsliteByUser: db.prepare(`
+    SELECT id, exhibition_id, target_type
+    FROM eslite_subscriptions
+    WHERE user_id = @user_id AND target_id = @target_id
+    ORDER BY id ASC
+  `),
+
+  getAllEsliteExhibitions: db.prepare(`
+    SELECT DISTINCT exhibition_id FROM eslite_subscriptions
+  `),
+
+  getEsliteSubsForExhibition: db.prepare(`
+    SELECT id, user_id, target_id, target_type
+    FROM eslite_subscriptions
+    WHERE exhibition_id = @exhibition_id
+  `),
+
+  findEsliteSubscription: db.prepare(`
+    SELECT id FROM eslite_subscriptions
+    WHERE user_id = @user_id AND target_id = @target_id AND exhibition_id = @exhibition_id
+  `),
+
+  getEsliteSnapshot: db.prepare(`
+    SELECT snapshot_json FROM eslite_snapshots WHERE exhibition_id = @exhibition_id
+  `),
+
+  upsertEsliteSnapshot: db.prepare(`
+    INSERT INTO eslite_snapshots (exhibition_id, snapshot_json, updated_at)
+    VALUES (@exhibition_id, @snapshot_json, CURRENT_TIMESTAMP)
+    ON CONFLICT(exhibition_id) DO UPDATE SET
+      snapshot_json = excluded.snapshot_json,
+      updated_at    = CURRENT_TIMESTAMP
+  `),
+
+  // ── Momo restock ────────────────────────────────────────────────────────
+
+  addMomoSubscription: db.prepare(`
+    INSERT INTO momo_subscriptions (user_id, target_id, target_type, category_url)
+    VALUES (@user_id, @target_id, @target_type, @category_url)
+  `),
+
+  removeMomoSubscription: db.prepare(`
+    DELETE FROM momo_subscriptions WHERE id = @id AND user_id = @user_id
+  `),
+
+  listMomoByUser: db.prepare(`
+    SELECT id, category_url, target_type
+    FROM momo_subscriptions
+    WHERE user_id = @user_id AND target_id = @target_id
+    ORDER BY id ASC
+  `),
+
+  getAllMomoCategories: db.prepare(`
+    SELECT DISTINCT category_url FROM momo_subscriptions
+  `),
+
+  getMomoSubsForCategory: db.prepare(`
+    SELECT id, user_id, target_id, target_type
+    FROM momo_subscriptions
+    WHERE category_url = @category_url
+  `),
+
+  findMomoSubscription: db.prepare(`
+    SELECT id FROM momo_subscriptions
+    WHERE user_id = @user_id AND target_id = @target_id AND category_url = @category_url
+  `),
+
+  getMomoSnapshot: db.prepare(`
+    SELECT snapshot_json FROM momo_snapshots WHERE category_url = @category_url
+  `),
+
+  upsertMomoSnapshot: db.prepare(`
+    INSERT INTO momo_snapshots (category_url, snapshot_json, updated_at)
     VALUES (@category_url, @snapshot_json, CURRENT_TIMESTAMP)
     ON CONFLICT(category_url) DO UPDATE SET
       snapshot_json = excluded.snapshot_json,
@@ -330,6 +483,151 @@ function upsertShopSnapshot(category_url, snapshotObj) {
   });
 }
 
+// ─── Settings API ───────────────────────────────────────────────────────────
+
+/**
+ * Get a setting value by key. Returns defaultValue if not found.
+ * @param {string} key
+ * @param {string} [defaultValue]
+ * @returns {string|undefined}
+ */
+function getSetting(key, defaultValue) {
+  const row = stmts.getSetting.get({ key });
+  return row ? row.value : defaultValue;
+}
+
+/**
+ * Get a numeric setting value in milliseconds.
+ * Key convention: `poll_interval_ms`, `shop_poll_interval_ms`, `eslite_poll_interval_ms`
+ * @param {string} key
+ * @param {number} envFallback  value from process.env (already parsed)
+ * @returns {number}
+ */
+function getIntervalMs(key, envFallback) {
+  const val = getSetting(key);
+  if (val !== undefined) {
+    const parsed = parseInt(val, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return envFallback;
+}
+
+/**
+ * Set a setting value.
+ * @param {string} key
+ * @param {string} value
+ */
+function setSetting(key, value) {
+  stmts.setSetting.run({ key, value });
+}
+
+/**
+ * Get all settings as an array of { key, value, updated_at }.
+ */
+function getAllSettings() {
+  return stmts.getAllSettings.all();
+}
+
+// ─── Eslite Restock API ─────────────────────────────────────────────────────
+
+/** Add an eslite exhibition restock subscription. */
+function addEsliteSubscription(params) {
+  const result = stmts.addEsliteSubscription.run(params);
+  return result.lastInsertRowid;
+}
+
+/** Remove an eslite subscription (only if owned by user_id). */
+function removeEsliteSubscription({ id, user_id }) {
+  const result = stmts.removeEsliteSubscription.run({ id, user_id });
+  return result.changes;
+}
+
+/** List all eslite subscriptions for a user in a channel/dm. */
+function listEsliteSubscriptions({ user_id, target_id }) {
+  return stmts.listEsliteByUser.all({ user_id, target_id });
+}
+
+/** Get all distinct exhibition IDs that have at least one subscription. */
+function getAllEsliteExhibitions() {
+  const rows = stmts.getAllEsliteExhibitions.all();
+  return rows.map(r => r.exhibition_id);
+}
+
+/** Get all eslite subscriptions for a specific exhibition ID. */
+function getEsliteSubsForExhibition(exhibition_id) {
+  return stmts.getEsliteSubsForExhibition.all({ exhibition_id });
+}
+
+/** Check if an eslite subscription already exists. */
+function findEsliteSubscription(params) {
+  return stmts.findEsliteSubscription.get(params);
+}
+
+/** Get the persisted inventory snapshot for an exhibition (parsed JSON or null). */
+function getEsliteSnapshot(exhibition_id) {
+  const row = stmts.getEsliteSnapshot.get({ exhibition_id });
+  if (!row) return null;
+  try { return JSON.parse(row.snapshot_json); } catch { return null; }
+}
+
+/** Save/update the inventory snapshot for an exhibition. */
+function upsertEsliteSnapshot(exhibition_id, snapshotObj) {
+  stmts.upsertEsliteSnapshot.run({
+    exhibition_id,
+    snapshot_json: JSON.stringify(snapshotObj),
+  });
+}
+
+// ─── Momo Restock API ──────────────────────────────────────────────────────
+
+/** Add a momo category restock subscription. */
+function addMomoSubscription(params) {
+  const result = stmts.addMomoSubscription.run(params);
+  return result.lastInsertRowid;
+}
+
+/** Remove a momo subscription (only if owned by user_id). */
+function removeMomoSubscription({ id, user_id }) {
+  const result = stmts.removeMomoSubscription.run({ id, user_id });
+  return result.changes;
+}
+
+/** List all momo subscriptions for a user in a channel/dm. */
+function listMomoSubscriptions({ user_id, target_id }) {
+  return stmts.listMomoByUser.all({ user_id, target_id });
+}
+
+/** Get all distinct momo category URLs that have at least one subscription. */
+function getAllMomoCategories() {
+  const rows = stmts.getAllMomoCategories.all();
+  return rows.map(r => r.category_url);
+}
+
+/** Get all momo subscriptions for a specific category URL. */
+function getMomoSubsForCategory(category_url) {
+  return stmts.getMomoSubsForCategory.all({ category_url });
+}
+
+/** Check if a momo subscription already exists. */
+function findMomoSubscription(params) {
+  return stmts.findMomoSubscription.get(params);
+}
+
+/** Get the persisted inventory snapshot for a momo category (parsed JSON or null). */
+function getMomoSnapshot(category_url) {
+  const row = stmts.getMomoSnapshot.get({ category_url });
+  if (!row) return null;
+  try { return JSON.parse(row.snapshot_json); } catch { return null; }
+}
+
+/** Save/update the inventory snapshot for a momo category. */
+function upsertMomoSnapshot(category_url, snapshotObj) {
+  stmts.upsertMomoSnapshot.run({
+    category_url,
+    snapshot_json: JSON.stringify(snapshotObj),
+  });
+}
+
 // ─── Auto-buy Config API ─────────────────────────────────────────────────────
 
 /**
@@ -376,6 +674,11 @@ function hasAutobuyConfig(user_id) {
 }
 
 module.exports = {
+  // settings
+  getSetting,
+  setSetting,
+  getIntervalMs,
+  getAllSettings,
   addSubscription,
   removeSubscription,
   listSubscriptions,
@@ -393,6 +696,24 @@ module.exports = {
   findShopSubscription,
   getShopSnapshot,
   upsertShopSnapshot,
+  // eslite
+  addEsliteSubscription,
+  removeEsliteSubscription,
+  listEsliteSubscriptions,
+  getAllEsliteExhibitions,
+  getEsliteSubsForExhibition,
+  findEsliteSubscription,
+  getEsliteSnapshot,
+  upsertEsliteSnapshot,
+  // momo
+  addMomoSubscription,
+  removeMomoSubscription,
+  listMomoSubscriptions,
+  getAllMomoCategories,
+  getMomoSubsForCategory,
+  findMomoSubscription,
+  getMomoSnapshot,
+  upsertMomoSnapshot,
   // autobuy
   setAutobuyConfig,
   setAutobuyProfile,

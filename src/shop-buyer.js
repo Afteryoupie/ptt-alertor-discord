@@ -246,9 +246,10 @@ async function buyProduct(sessionCookie, handle, profile = {}) {
       throw new Error('無法取得購物車 token，請確認 cookie 是否有效。');
     }
 
-    // Calculate items total from cart (sum all items)
+    // Calculate items total from cart (sum all items). 
+    // Notice: removed the / 100 since Cyberbiz returns prices in TWD
     const itemsTotal = (cart.items || []).reduce(
-      (sum, item) => sum + (item.final_price || item.price || 0) * (item.quantity || 1) / 100,
+      (sum, item) => sum + (parseFloat(item.final_price || item.price || 0) * parseInt(item.quantity || 1, 10)),
       0
     ) || parseFloat(variant.price) || 0;
 
@@ -271,39 +272,33 @@ async function buyProduct(sessionCookie, handle, profile = {}) {
 }
 
 /**
- * Validate that a session cookie is active.
- * Fetches /account and checks whether the final URL stays on /account
- * (logged in) or redirects to /users/sign_in (not logged in).
+ * Validate that a session cookie is active by checking account API.
  * @param {string} sessionCookie
  * @returns {Promise<{ valid: boolean, email?: string }>}
  */
 async function validateSession(sessionCookie) {
   try {
-    // Follow redirects; check where we end up
+    // Cyberbiz stores customer info in localStorage; best we can do via HTTP
+    // is check if /account redirects (unauthenticated) or loads (authenticated)
     const res = await fetch(`${SHOP_BASE}/account`, {
       headers: {
         ...buildHeaders(sessionCookie, `${SHOP_BASE}/`),
         'Accept': 'text/html,*/*',
       },
-      // redirect: 'follow' is the default — let Node.js follow them
-      signal: AbortSignal.timeout(10_000),
+      redirect: 'manual', // Don't follow redirects
+      signal:   AbortSignal.timeout(10_000),
     });
 
-    const finalUrl = res.url || '';
-
-    // Unauthenticated → redirected to sign_in page
-    if (finalUrl.includes('sign_in') || finalUrl.includes('/login')) {
-      return { valid: false };
+    // Authenticated: 200 on /account. Unauthenticated: 302 redirect to /users/sign_in
+    if (res.status === 200) {
+      const html  = await res.text().catch(() => '');
+      const match = html.match(/["']email["']\s*[:=]\s*["']([^"'@]+@[^"']+)["']/i);
+      return { valid: true, email: match?.[1] || null };
     }
-
-    // Also validate by checking CSRF token availability (only works when logged in)
-    const html   = await res.text().catch(() => '');
-    const match  = html.match(/["']email["']\s*[:=]\s*["']([^"'@]+@[^"']+)["']/i);
-    return { valid: true, email: match?.[1] || null };
+    return { valid: false };
   } catch {
     return { valid: false };
   }
 }
-
 
 module.exports = { buyProduct, validateSession, pickBestVariant };
