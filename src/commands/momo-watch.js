@@ -74,6 +74,7 @@ module.exports = {
             '支援格式：',
             '• `https://www.momoshop.com.tw/category/DgrpCategory.jsp?d_code=2701202072`',
             '• `https://www.momoshop.com.tw/category/MgrpCategory.jsp?m_code=2701201978`',
+            '• 品牌旗艦館/店中店：`https://www.momoshop.com.tw/TP/TP0002451/search?keyword=戰鬥陀螺`',
             '• 純數字代碼（如 `2701202072`）',
           ].join('\n'),
           flags: [MessageFlags.Ephemeral],
@@ -149,7 +150,7 @@ module.exports = {
           '',
           ...lines,
           '',
-          '使用 `/momo-watch remove <ID>` 移除訂閱。',
+          '使用 `/momo-watch remove <ID>` 移除訂閱，或使用 `/list` 檢視全平台追蹤。',
         ].join('\n'),
         flags: [MessageFlags.Ephemeral],
       });

@@ -132,7 +132,7 @@ module.exports = {
           '',
           ...lines,
           '',
-          '使用 `/eslite-watch remove <ID>` 移除訂閱。',
+          '使用 `/eslite-watch remove <ID>` 移除訂閱，或使用 `/list` 檢視全平台追蹤。',
         ].join('\n'),
         flags: [MessageFlags.Ephemeral],
       });

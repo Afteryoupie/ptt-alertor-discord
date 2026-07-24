@@ -44,9 +44,9 @@ npm start
 - `/unsubscribe` - 依據編號（可從 `/list` 取得）取消訂閱。
 
 ### 🛒 Funbox 商店補貨追蹤
-- `/shop-watch add <url>` - 新增補貨追蹤。輸入 Funbox 商品分類頁面網址，當該分類有商品從缺貨變為有貨時發送通知。
-- `/shop-watch list` - 列出此頻道/私訊目前的補貨追蹤訂閱。
-- `/shop-watch remove <id>` - 依據 ID 移除補貨追蹤。
+- `/funbox-watch add <url>` - 新增補貨追蹤。輸入 Funbox 商品分類頁面網址，當該分類有商品從缺貨變為有貨時發送通知。
+- `/funbox-watch list` - 列出此頻道/私訊目前的補貨追蹤訂閱。
+- `/funbox-watch remove <id>` - 依據 ID 移除補貨追蹤。
 
 ### 🤖 Funbox 自動購買 (Auto-buy)
 - `/shop-autobuy setup` - 設定自動購買功能，綁定 Funbox 帳號與 7-11 取貨門市（需有庫存快照與設定 Cookie 加密密鑰）。
@@ -63,6 +63,11 @@ npm start
 - `/momo-watch add <url>` - 新增 momo 購物網分類追蹤。當該分類內有商品補貨或即將開賣時發送通知。
 - `/momo-watch list` - 列出此頻道/私訊目前的 momo 追蹤訂閱。
 - `/momo-watch remove <id>` - 依據 ID 移除 momo 追蹤。
+
+### 🟠 蝦皮 (Shopee) 追蹤
+- `/shopee-watch add <url>` - 新增蝦皮賣場/關鍵字商品追蹤（例如 `https://shopee.tw/search?keyword=戰鬥陀螺&shop=11664018`）。當賣場商品補貨、新上架或價格變動時發送通知。
+- `/shopee-watch list` - 列出此頻道/私訊目前的蝦皮追蹤訂閱。
+- `/shopee-watch remove <id>` - 依據 ID 移除蝦皮追蹤。
 
 ### ⚙️ 系統設定 (限伺服器管理員)
 - `/config interval-set` - 設定特定掃描器（PTT/Funbox/誠品/momo）的輪詢間隔時間 (1-60 分鐘)。

@@ -37,7 +37,7 @@ function categoryLabel(url) {
 
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName('shop-watch')
+    .setName('funbox-watch')
     .setDescription('管理 Funbox 商店補貨通知')
     .addSubcommand(sub =>
       sub
@@ -57,7 +57,7 @@ module.exports = {
         .addIntegerOption(opt =>
           opt
             .setName('id')
-            .setDescription('訂閱 ID（使用 /shop-watch list 查詢）')
+            .setDescription('訂閱 ID（使用 /funbox-watch list 查詢）')
             .setRequired(true)
         )
     )
@@ -141,7 +141,7 @@ module.exports = {
 
       if (!subs.length) {
         return interaction.reply({
-          content: '📭 目前沒有任何商店補貨追蹤。\n使用 `/shop-watch add` 新增！',
+          content: '📭 目前沒有任何商店補貨追蹤。\n使用 `/funbox-watch add` 新增！',
           flags: [MessageFlags.Ephemeral],
         });
       }
@@ -156,7 +156,7 @@ module.exports = {
           '',
           ...lines,
           '',
-          '使用 `/shop-watch remove <ID>` 移除訂閱。',
+          '使用 `/funbox-watch remove <ID>` 移除訂閱，或使用 `/list` 檢視全平台追蹤。',
         ].join('\n'),
         flags: [MessageFlags.Ephemeral],
       });

@@ -228,4 +228,29 @@ function sendMomoRestockNotifications(client, matches) {
   );
 }
 
-module.exports = { sendNotifications, sendRestockNotifications, sendEsliteRestockNotifications, sendMomoRestockNotifications };
+function buildShopeeEmbed(change) {
+  return new EmbedBuilder()
+    .setColor(0xee4d2d) // Shopee Orange
+    .setTitle(change.title)
+    .setDescription(change.description)
+    .setURL(change.url)
+    .setFooter({ text: '蝦皮 (Shopee) 追蹤通知' })
+    .setTimestamp();
+}
+
+/** Send Shopee restock / new item / change notifications. */
+function sendShopeeRestockNotifications(client, matches) {
+  return sendMatchNotifications(
+    client, matches,
+    m => buildShopeeEmbed(m.change),
+    '[shopee]'
+  );
+}
+
+module.exports = {
+  sendNotifications,
+  sendRestockNotifications,
+  sendEsliteRestockNotifications,
+  sendMomoRestockNotifications,
+  sendShopeeRestockNotifications,
+};

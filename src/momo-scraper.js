@@ -50,6 +50,16 @@ function parseCategoryInput(input) {
   if (trimmed.startsWith('http')) {
     try {
       const u = new URL(trimmed);
+
+      // Support Momo TP store (品牌旗艦館/店中店) URLs e.g. https://www.momoshop.com.tw/TP/TP0002451/search?keyword=戰鬥陀螺
+      const tpMatch = u.pathname.match(/\/TP\/(TP\d+)/i);
+      if (tpMatch) {
+        const tpId = tpMatch[1].toUpperCase();
+        let kw = u.searchParams.get('keyword') || '';
+        if (kw) kw = decodeURIComponent(kw).trim();
+        return { cateCode: `${tpId}_${kw}`, cateType: 'tp' };
+      }
+
       const dCode = u.searchParams.get('d_code');
       const mCode = u.searchParams.get('m_code');
       if (dCode) return { cateCode: dCode, cateType: 'd' };
@@ -63,16 +73,25 @@ function parseCategoryInput(input) {
     return { cateCode: trimmed, cateType: 'd' };
   }
 
-  throw new Error(`無效的 momo 分類代碼格式: ${trimmed}`);
+  throw new Error(`無效的 momo 分類或店家網址格式: ${trimmed}`);
 }
 
 /**
  * Build the canonical category URL for storage and display.
  * @param {string} cateCode
- * @param {'d'|'m'} cateType
+ * @param {'d'|'m'|'tp'} cateType
  * @returns {string}
  */
 function categoryUrl(cateCode, cateType) {
+  if (cateType === 'tp') {
+    const idx = cateCode.indexOf('_');
+    const tpId = idx !== -1 ? cateCode.slice(0, idx) : cateCode;
+    const kw = idx !== -1 ? cateCode.slice(idx + 1) : '';
+    if (kw) {
+      return `${MOMO_BASE_URL}/TP/${tpId}/search?keyword=${encodeURIComponent(kw)}`;
+    }
+    return `${MOMO_BASE_URL}/TP/${tpId}`;
+  }
   if (cateType === 'm') {
     return `${MOMO_BASE_URL}/category/MgrpCategory.jsp?m_code=${cateCode}`;
   }
@@ -181,6 +200,55 @@ function getStatus(g) {
  * @returns {Promise<Map<string, object>>}
  */
 async function snapshotCategory(cateCode, cateType = 'd', maxPages = DEFAULT_MAX_PAGES) {
+  if (cateType === 'tp') {
+    const targetUrl = categoryUrl(cateCode, 'tp');
+    const idx = cateCode.indexOf('_');
+    const tpId = idx !== -1 ? cateCode.slice(0, idx) : cateCode;
+    const kw = idx !== -1 ? cateCode.slice(idx + 1) : '';
+
+    const res = await fetch(targetUrl, {
+      redirect: 'manual',
+      headers: {
+        'User-Agent': randomUA(),
+        'Accept-Language': 'zh-TW,zh;q=0.9',
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    const snapshot = new Map();
+    const itemCode = `TP_${cateCode}`;
+
+    if (res.status !== 200) {
+      snapshot.set(itemCode, {
+        goodsCode: itemCode,
+        name: `[${tpId}] ${kw || '商品'}`,
+        url: targetUrl,
+        stock: 0,
+        onSaleDescription: '無貨轉跳中',
+        status: 'out_of_stock',
+      });
+      return snapshot;
+    }
+
+    const html = await res.text();
+    const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+    const title = titleMatch ? titleMatch[1] : '';
+
+    const storeMatch = title.match(/於(.+?)(?:商城|旗艦館)搜尋/);
+    const storeName = storeMatch ? storeMatch[1] : tpId;
+
+    snapshot.set(itemCode, {
+      goodsCode: itemCode,
+      name: `[${storeName}] ${kw || '商品'}`,
+      url: targetUrl,
+      stock: 1,
+      onSaleDescription: '',
+      status: 'available',
+    });
+
+    return snapshot;
+  }
+
   const rawGoods = await fetchAllProducts(cateCode, maxPages);
   const snapshot = new Map();
 

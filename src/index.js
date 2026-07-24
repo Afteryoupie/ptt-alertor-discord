@@ -8,7 +8,7 @@ const fs   = require('fs');
 
 const db                  = require('./database');
 const { crawlBoard, matchKeyword, matchAuthor } = require('./scraper');
-const { sendNotifications, sendRestockNotifications, sendEsliteRestockNotifications, sendMomoRestockNotifications } = require('./notifier');
+const { sendNotifications, sendRestockNotifications, sendEsliteRestockNotifications, sendMomoRestockNotifications, sendShopeeRestockNotifications } = require('./notifier');
 const {
   snapshotCategory,
   detectRestocks,
@@ -30,6 +30,10 @@ const {
   serializeSnapshot: serializeMomoSnapshot,
   deserializeSnapshot: deserializeMomoSnapshot,
 } = require('./momo-scraper');
+const {
+  snapshotShopeeSearch,
+  detectShopeeChanges,
+} = require('./shopee-scraper');
 const { buyProduct }   = require('./shop-buyer');
 const { decryptCookie } = require('./crypto-utils');
 
@@ -44,6 +48,7 @@ const ENV_INTERVALS = {
   shop_poll_interval_ms:   parseInt(process.env.SHOP_POLL_INTERVAL_MS   || '300000', 10),
   eslite_poll_interval_ms: parseInt(process.env.ESLITE_POLL_INTERVAL_MS || '300000', 10),
   momo_poll_interval_ms:   parseInt(process.env.MOMO_POLL_INTERVAL_MS   || '300000', 10),
+  shopee_poll_interval_ms: parseInt(process.env.SHOPEE_POLL_INTERVAL_MS || '300000', 10),
 };
 
 if (!TOKEN) {
@@ -84,10 +89,12 @@ client.once('clientReady', () => {
   console.log(`[startup] 🛒 Shop interval:   ${db.getIntervalMs('shop_poll_interval_ms',   ENV_INTERVALS.shop_poll_interval_ms) / 1000}s (${getOpHours('shop')})`);
   console.log(`[startup] 🏬 Eslite interval: ${db.getIntervalMs('eslite_poll_interval_ms', ENV_INTERVALS.eslite_poll_interval_ms) / 1000}s (${getOpHours('eslite')})`);
   console.log(`[startup] 🛍️  Momo interval:  ${db.getIntervalMs('momo_poll_interval_ms',   ENV_INTERVALS.momo_poll_interval_ms) / 1000}s (${getOpHours('momo')})`);
+  console.log(`[startup] 🟠 Shopee interval:${db.getIntervalMs('shopee_poll_interval_ms', ENV_INTERVALS.shopee_poll_interval_ms) / 1000}s (${getOpHours('shopee')})`);
   startScraperLoop();
   startShopScraperLoop();
   startEsliteScraperLoop();
   startMomoScraperLoop();
+  startShopeeScraperLoop();
 });
 
 client.on('interactionCreate', async interaction => {
@@ -594,6 +601,86 @@ function startMomoScraperLoop() {
     await tick();
     const interval = db.getIntervalMs('momo_poll_interval_ms', ENV_INTERVALS.momo_poll_interval_ms);
     console.log(`[momo] ⏳ 下次掃描於 ${interval / 1000}s 後。`);
+    setTimeout(schedule, interval);
+  }
+
+  schedule();
+}
+
+// ─── Shopee Scraper Loop ──────────────────────────────────────────────────────
+
+function startShopeeScraperLoop() {
+  let running = false;
+
+  async function tick() {
+    if (running) return;
+    if (!isWithinOperatingHours('shopee')) {
+      console.log(`[shopee] 💤 目前不在運作時間內，跳過掃描。`);
+      return;
+    }
+    running = true;
+
+    try {
+      const searches = db.getAllShopeeSearches();
+      if (!searches.length) return;
+
+      console.log(`[shopee] === 開始輪詢 ${searches.length} 個蝦皮追蹤網址 (${new Date().toLocaleTimeString('zh-TW')}) ===`);
+
+      const allChangeMatches = [];
+
+      for (const item of searches) {
+        const { search_url, keyword, shop_id } = item;
+        const subs = db.getShopeeSubsForSearch(search_url);
+        if (!subs.length) continue;
+
+        try {
+          const newSnap = await snapshotShopeeSearch({ shopId: shop_id, keyword });
+          const oldSnap = db.getShopeeSnapshot(search_url);
+          db.upsertShopeeSnapshot(search_url, newSnap);
+
+          if (!oldSnap) {
+            console.log(`[shopee] 🆕 建立蝦皮快照: ${search_url}`);
+            continue;
+          }
+
+          const changes = detectShopeeChanges(oldSnap, newSnap);
+          if (changes.length) {
+            console.log(`[shopee] 🎯 發現 ${changes.length} 項變動: ${search_url}`);
+            for (const change of changes) {
+              for (const sub of subs) {
+                allChangeMatches.push({
+                  targetId: sub.target_id,
+                  targetType: sub.target_type,
+                  change,
+                  searchUrl: search_url,
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`[shopee] ❌ 掃描失敗 ${search_url}:`, err.message);
+        }
+
+        await sleep(2000);
+      }
+
+      if (allChangeMatches.length) {
+        console.log(`[shopee] 🚀 發送 ${allChangeMatches.length} 則蝦皮通知...`);
+        await sendShopeeRestockNotifications(client, allChangeMatches);
+      }
+
+      console.log(`[shopee] === 循環結束 (${new Date().toLocaleTimeString('zh-TW')}) ===`);
+    } catch (err) {
+      console.error('[shopee] Unexpected error in tick:', err);
+    } finally {
+      running = false;
+    }
+  }
+
+  async function schedule() {
+    await tick();
+    const interval = db.getIntervalMs('shopee_poll_interval_ms', ENV_INTERVALS.shopee_poll_interval_ms);
+    console.log(`[shopee] ⏳ 下次掃描於 ${interval / 1000}s 後。`);
     setTimeout(schedule, interval);
   }
 

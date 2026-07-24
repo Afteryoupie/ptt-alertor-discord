@@ -103,6 +103,27 @@ db.exec(`
     updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Shopee restock & search tracking
+  CREATE TABLE IF NOT EXISTS shopee_subscriptions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      TEXT NOT NULL,
+    target_id    TEXT NOT NULL,
+    target_type  TEXT NOT NULL CHECK(target_type IN ('channel', 'dm')),
+    search_url   TEXT NOT NULL,
+    keyword      TEXT,
+    shop_id      TEXT,
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_shopee_subs_url  ON shopee_subscriptions(search_url);
+  CREATE INDEX IF NOT EXISTS idx_shopee_subs_user ON shopee_subscriptions(user_id);
+
+  CREATE TABLE IF NOT EXISTS shopee_snapshots (
+    search_url    TEXT PRIMARY KEY,
+    snapshot_json TEXT NOT NULL,
+    updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- Auto-buy: encrypted session cookies per user
   CREATE TABLE IF NOT EXISTS autobuy_configs (
     user_id          TEXT PRIMARY KEY,
@@ -326,6 +347,51 @@ const stmts = {
     INSERT INTO momo_snapshots (category_url, snapshot_json, updated_at)
     VALUES (@category_url, @snapshot_json, CURRENT_TIMESTAMP)
     ON CONFLICT(category_url) DO UPDATE SET
+      snapshot_json = excluded.snapshot_json,
+      updated_at    = CURRENT_TIMESTAMP
+  `),
+
+  // ── Shopee restock ───────────────────────────────────────────────────────
+
+  addShopeeSubscription: db.prepare(`
+    INSERT INTO shopee_subscriptions (user_id, target_id, target_type, search_url, keyword, shop_id)
+    VALUES (@user_id, @target_id, @target_type, @search_url, @keyword, @shop_id)
+  `),
+
+  removeShopeeSubscription: db.prepare(`
+    DELETE FROM shopee_subscriptions WHERE id = @id AND user_id = @user_id
+  `),
+
+  listShopeeByUser: db.prepare(`
+    SELECT id, search_url, keyword, shop_id, target_type
+    FROM shopee_subscriptions
+    WHERE user_id = @user_id AND target_id = @target_id
+    ORDER BY id ASC
+  `),
+
+  getAllShopeeSearches: db.prepare(`
+    SELECT DISTINCT search_url, keyword, shop_id FROM shopee_subscriptions
+  `),
+
+  getShopeeSubsForSearch: db.prepare(`
+    SELECT id, user_id, target_id, target_type
+    FROM shopee_subscriptions
+    WHERE search_url = @search_url
+  `),
+
+  findShopeeSubscription: db.prepare(`
+    SELECT id FROM shopee_subscriptions
+    WHERE user_id = @user_id AND target_id = @target_id AND search_url = @search_url
+  `),
+
+  getShopeeSnapshot: db.prepare(`
+    SELECT snapshot_json FROM shopee_snapshots WHERE search_url = @search_url
+  `),
+
+  upsertShopeeSnapshot: db.prepare(`
+    INSERT INTO shopee_snapshots (search_url, snapshot_json, updated_at)
+    VALUES (@search_url, @snapshot_json, CURRENT_TIMESTAMP)
+    ON CONFLICT(search_url) DO UPDATE SET
       snapshot_json = excluded.snapshot_json,
       updated_at    = CURRENT_TIMESTAMP
   `),
@@ -673,6 +739,91 @@ function hasAutobuyConfig(user_id) {
   return !!stmts.hasAutobuyConfig.get({ user_id });
 }
 
+// ─── Shopee Restock API ──────────────────────────────────────────────────────
+
+/** Add a shopee search/shop subscription. */
+function addShopeeSubscription(params) {
+  const result = stmts.addShopeeSubscription.run(params);
+  return result.lastInsertRowid;
+}
+
+/** Remove a shopee subscription (only if owned by user_id). */
+function removeShopeeSubscription({ id, user_id }) {
+  const result = stmts.removeShopeeSubscription.run({ id, user_id });
+  return result.changes;
+}
+
+/** List all shopee subscriptions for a user in a channel/dm. */
+function listShopeeSubscriptions({ user_id, target_id }) {
+  return stmts.listShopeeByUser.all({ user_id, target_id });
+}
+
+/** Get all distinct shopee search URLs that have at least one subscription. */
+function getAllShopeeSearches() {
+  return stmts.getAllShopeeSearches.all();
+}
+
+/** Get all shopee subscriptions for a specific search URL. */
+function getShopeeSubsForSearch(search_url) {
+  return stmts.getShopeeSubsForSearch.all({ search_url });
+}
+
+/** Check if a shopee subscription already exists. */
+function findShopeeSubscription(params) {
+  return stmts.findShopeeSubscription.get(params);
+}
+
+/** Get the persisted snapshot for a shopee search (parsed JSON or null). */
+function getShopeeSnapshot(search_url) {
+  const row = stmts.getShopeeSnapshot.get({ search_url });
+  if (!row) return null;
+  try { return JSON.parse(row.snapshot_json); } catch { return null; }
+}
+
+/** Save/update the snapshot for a shopee search. */
+function upsertShopeeSnapshot(search_url, snapshotObj) {
+  stmts.upsertShopeeSnapshot.run({
+    search_url,
+    snapshot_json: JSON.stringify(snapshotObj),
+  });
+}
+
+/**
+ * List all subscriptions across all platforms (PTT, Funbox, Momo, Eslite, Shopee) for a user in a channel/DM.
+ * @param {{ user_id: string, target_id: string }} params
+ */
+function getUserAllSubscriptions({ user_id, target_id }) {
+  const ptt = stmts.listByUser.all({ user_id, target_id }).map(r => ({ ...r, platform: 'ptt' }));
+  const shop = stmts.listShopByUser.all({ user_id, target_id }).map(r => ({ ...r, platform: 'shop' }));
+  const momo = stmts.listMomoByUser.all({ user_id, target_id }).map(r => ({ ...r, platform: 'momo' }));
+  const eslite = stmts.listEsliteByUser.all({ user_id, target_id }).map(r => ({ ...r, platform: 'eslite' }));
+  const shopee = stmts.listShopeeByUser.all({ user_id, target_id }).map(r => ({ ...r, platform: 'shopee' }));
+
+  return [...ptt, ...shop, ...momo, ...eslite, ...shopee];
+}
+
+/**
+ * Remove a subscription by platform and ID.
+ * @param {{ platform: string, id: number, user_id: string }} params
+ * @returns {number} number of rows deleted
+ */
+function removeSubscriptionByPlatform({ platform, id, user_id }) {
+  switch (platform) {
+    case 'ptt':
+      return removeSubscription({ id, user_id });
+    case 'shop':
+      return removeShopSubscription({ id, user_id });
+    case 'momo':
+      return removeMomoSubscription({ id, user_id });
+    case 'eslite':
+      return removeEsliteSubscription({ id, user_id });
+    case 'shopee':
+      return removeShopeeSubscription({ id, user_id });
+    default:
+      return 0;
+  }
+}
+
 module.exports = {
   // settings
   getSetting,
@@ -687,6 +838,9 @@ module.exports = {
   getBoardState,
   upsertBoardState,
   findSubscription,
+  // unified
+  getUserAllSubscriptions,
+  removeSubscriptionByPlatform,
   // shop
   addShopSubscription,
   removeShopSubscription,
@@ -714,6 +868,15 @@ module.exports = {
   findMomoSubscription,
   getMomoSnapshot,
   upsertMomoSnapshot,
+  // shopee
+  addShopeeSubscription,
+  removeShopeeSubscription,
+  listShopeeSubscriptions,
+  getAllShopeeSearches,
+  getShopeeSubsForSearch,
+  findShopeeSubscription,
+  getShopeeSnapshot,
+  upsertShopeeSnapshot,
   // autobuy
   setAutobuyConfig,
   setAutobuyProfile,
@@ -721,3 +884,4 @@ module.exports = {
   deleteAutobuyConfig,
   hasAutobuyConfig,
 };
+
