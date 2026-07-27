@@ -395,42 +395,6 @@ const stmts = {
       snapshot_json = excluded.snapshot_json,
       updated_at    = CURRENT_TIMESTAMP
   `),
-
-  // ── Auto-buy config ──────────────────────────────────────────────────────
-
-  setAutobuyConfig: db.prepare(`
-    INSERT INTO autobuy_configs (user_id, encrypted_cookie, iv, auth_tag, updated_at)
-    VALUES (@user_id, @encrypted_cookie, @iv, @auth_tag, CURRENT_TIMESTAMP)
-    ON CONFLICT(user_id) DO UPDATE SET
-      encrypted_cookie = excluded.encrypted_cookie,
-      iv               = excluded.iv,
-      auth_tag         = excluded.auth_tag,
-      updated_at       = CURRENT_TIMESTAMP
-  `),
-
-  getAutobuyConfig: db.prepare(`
-    SELECT encrypted_cookie, iv, auth_tag, name, email, phone,
-           seven_store_id, seven_store_name, seven_store_addr
-    FROM autobuy_configs WHERE user_id = @user_id
-  `),
-
-  setAutobuyProfile: db.prepare(`
-    UPDATE autobuy_configs
-    SET name = @name, email = @email, phone = @phone,
-        seven_store_id   = @seven_store_id,
-        seven_store_name = @seven_store_name,
-        seven_store_addr = @seven_store_addr,
-        updated_at       = CURRENT_TIMESTAMP
-    WHERE user_id = @user_id
-  `),
-
-  deleteAutobuyConfig: db.prepare(`
-    DELETE FROM autobuy_configs WHERE user_id = @user_id
-  `),
-
-  hasAutobuyConfig: db.prepare(`
-    SELECT 1 FROM autobuy_configs WHERE user_id = @user_id
-  `),
 };
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -877,11 +841,5 @@ module.exports = {
   findShopeeSubscription,
   getShopeeSnapshot,
   upsertShopeeSnapshot,
-  // autobuy
-  setAutobuyConfig,
-  setAutobuyProfile,
-  getAutobuyConfig,
-  deleteAutobuyConfig,
-  hasAutobuyConfig,
 };
 

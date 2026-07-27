@@ -1,10 +1,10 @@
 #!/bin/bash
-# gitpush.sh - Helper script for git add, commit, and push
+# gitpush.sh - Commit and push changes to git repository
 
-COMMIT_MSG="${1:-feat: 統整追蹤清單指令，新增蝦皮追蹤與 Momo TP 店中店網址支援}"
+COMMIT_MSG="${1:-feat: 新增全平台 /watch 統一指令、移除 auto-buy、優化蝦皮與 momo 追蹤}"
 
-echo "📦 正在 Staging 修改過的檔案..."
-git add .
+echo "📦 正在 Staging 修改與刪除的檔案..."
+git add -A
 
 echo "📝 正在 Commit 修改..."
 git commit -m "$COMMIT_MSG"

@@ -146,7 +146,7 @@ function detectShopeeChanges(oldSnap, newSnap) {
 
   const changes = [];
   const shopName = newSnap.shopName || `賣場 ${newSnap.shopId}`;
-  const shopUrl = `https://shopee.tw/shop/${newSnap.shopId}`;
+  const targetUrl = `https://shopee.tw/search?keyword=${encodeURIComponent(newSnap.keyword || '')}&shop=${newSnap.shopId}`;
 
   // 1. Matched category item count change (restock / new items in category)
   if (oldSnap.matchedCategory && newSnap.matchedCategory) {
@@ -157,7 +157,7 @@ function detectShopeeChanges(oldSnap, newSnap) {
         type: 'restock',
         title: `🛍️ 蝦皮賣場【${shopName}】分類「${newSnap.matchedCategory.displayName}」有新商品/補貨！`,
         description: `商品數量：\`${oldTotal}\` ➡️ **\`${newTotal}\`** 筆 (+${newTotal - oldTotal})`,
-        url: `${shopUrl}/search?keyword=${encodeURIComponent(newSnap.keyword || '')}`,
+        url: targetUrl,
       });
     }
   } else if (!oldSnap.matchedCategory && newSnap.matchedCategory) {
@@ -166,17 +166,7 @@ function detectShopeeChanges(oldSnap, newSnap) {
       type: 'new_category',
       title: `✨ 蝦皮賣場【${shopName}】新增與「${newSnap.keyword}」相關的分類！`,
       description: `分類名稱：**${newSnap.matchedCategory.displayName}**（共 \`${newSnap.matchedCategory.total}\` 筆商品）`,
-      url: `${shopUrl}/search?keyword=${encodeURIComponent(newSnap.keyword || '')}`,
-    });
-  }
-
-  // 2. Overall shop item count change
-  if (newSnap.itemCount > oldSnap.itemCount) {
-    changes.push({
-      type: 'new_arrival',
-      title: `📦 蝦皮賣場【${shopName}】上架了新商品！`,
-      description: `賣場總商品數：\`${oldSnap.itemCount}\` ➡️ **\`${newSnap.itemCount}\`** 筆 (+${newSnap.itemCount - oldSnap.itemCount})`,
-      url: shopUrl,
+      url: targetUrl,
     });
   }
 

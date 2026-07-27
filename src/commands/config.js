@@ -47,7 +47,20 @@ const INTERVAL_CONFIGS = {
     minMs:     60_000,
     maxMs:     3_600_000,
   },
+  shopee: {
+    key:       'shopee_poll_interval_ms',
+    label:     '蝦皮購物',
+    envKey:    'SHOPEE_POLL_INTERVAL_MS',
+    defaultMs: 300_000,
+    minMs:     60_000,
+    maxMs:     3_600_000,
+  },
 };
+
+const SCRAPER_CHOICES = Object.entries(INTERVAL_CONFIGS).map(([value, cfg]) => ({
+  name: cfg.label,
+  value,
+}));
 
 /** 把毫秒格式化成易讀字串，例如 300000 → "5 分鐘" */
 function formatMs(ms) {
@@ -76,12 +89,7 @@ module.exports = {
             .setName('scraper')
             .setDescription('要設定的掃描器')
             .setRequired(true)
-            .addChoices(
-              { name: 'PTT 看板', value: 'ptt' },
-              { name: 'Funbox 商店', value: 'shop' },
-              { name: '誠品展覽', value: 'eslite' },
-              { name: 'momo購物網', value: 'momo' },
-            )
+            .addChoices(...SCRAPER_CHOICES)
         )
         .addIntegerOption(opt =>
           opt
@@ -106,12 +114,7 @@ module.exports = {
             .setName('scraper')
             .setDescription('要重設的掃描器')
             .setRequired(true)
-            .addChoices(
-              { name: 'PTT 看板', value: 'ptt' },
-              { name: 'Funbox 商店', value: 'shop' },
-              { name: '誠品展覽', value: 'eslite' },
-              { name: 'momo購物網', value: 'momo' },
-            )
+            .addChoices(...SCRAPER_CHOICES)
         )
     )
     .addSubcommand(sub =>
@@ -123,12 +126,7 @@ module.exports = {
             .setName('scraper')
             .setDescription('要設定的掃描器')
             .setRequired(true)
-            .addChoices(
-              { name: 'PTT 看板', value: 'ptt' },
-              { name: 'Funbox 商店', value: 'shop' },
-              { name: '誠品展覽', value: 'eslite' },
-              { name: 'momo購物網', value: 'momo' },
-            )
+            .addChoices(...SCRAPER_CHOICES)
         )
         .addIntegerOption(opt =>
           opt
@@ -161,12 +159,7 @@ module.exports = {
             .setName('scraper')
             .setDescription('要重設的掃描器')
             .setRequired(true)
-            .addChoices(
-              { name: 'PTT 看板', value: 'ptt' },
-              { name: 'Funbox 商店', value: 'shop' },
-              { name: '誠品展覽', value: 'eslite' },
-              { name: 'momo購物網', value: 'momo' },
-            )
+            .addChoices(...SCRAPER_CHOICES)
         )
     ),
 

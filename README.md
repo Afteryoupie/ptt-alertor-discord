@@ -38,6 +38,12 @@ npm start
 
 ## 📜 指令說明
 
+### 🌟 全平台統一追蹤指令 (Unified Watch)
+- `/watch add <url>` - 網址智慧自動識別。自動辨識網址為蝦皮、momo、誠品或 Funbox 並加入追蹤。
+- `/watch shopee <url>` / `/watch momo <url>` / `/watch eslite <url>` / `/watch funbox <url>` - 子平台指定追蹤。
+- `/watch list` - 列出全頻道/私訊的全平台追蹤清單（同 `/list`）。
+- `/watch remove <id>` - 依據全區編號刪除追蹤（同 `/unsubscribe`）。
+
 ### PTT 文章追蹤
 - `/subscribe` - 訂閱看板關鍵字或作者。支援多關鍵字、排除詞、作者追蹤。
 - `/list` - 查看目前在該頻道/私訊的所有訂閱清單。
@@ -47,12 +53,6 @@ npm start
 - `/funbox-watch add <url>` - 新增補貨追蹤。輸入 Funbox 商品分類頁面網址，當該分類有商品從缺貨變為有貨時發送通知。
 - `/funbox-watch list` - 列出此頻道/私訊目前的補貨追蹤訂閱。
 - `/funbox-watch remove <id>` - 依據 ID 移除補貨追蹤。
-
-### 🤖 Funbox 自動購買 (Auto-buy)
-- `/shop-autobuy setup` - 設定自動購買功能，綁定 Funbox 帳號與 7-11 取貨門市（需有庫存快照與設定 Cookie 加密密鑰）。
-- `/shop-autobuy test` - 測試自動購買設定是否正確（模擬結帳流程但不送出訂單）。
-- `/shop-autobuy status` - 查看自動購買設定狀態。
-- `/shop-autobuy remove` - 移除自動購買設定與綁定資料。
 
 ### 🏬 誠品線上展覽追蹤
 - `/eslite-watch add <url>` - 新增誠品展覽追蹤。輸入誠品展覽網址，當展覽內有商品從缺貨變為有貨、或新商品上架時發送通知。
