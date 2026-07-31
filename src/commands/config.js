@@ -174,28 +174,33 @@ module.exports = {
       const minutes    = interaction.options.getInteger('minutes', true);
       const cfg        = INTERVAL_CONFIGS[scraperKey];
       const guildId    = interaction.guildId;
+      const ms         = minutes * 60_000;
 
-      if (!guildId) {
+      if (guildId) {
+        db.setGuildSetting(guildId, cfg.key, String(ms));
+        console.log(`[config] [interval-set] guild:${guildId}:${cfg.key} = ${ms}ms (set by ${interaction.user.tag})`);
         return interaction.reply({
-          content: '❌ 此設定僅限在**伺服器頻道**中使用，無法在私訊中設定。',
-          flags: [MessageFlags.Ephemeral],
+          content: [
+            `✅ **已更新本伺服器的 ${cfg.label} 掃描間隔！**`,
+            ``,
+            `⏱️  新間隔：**${formatMs(ms)}**`,
+            `📌 下一次 tick 結束後即生效（不需重啟 Bot）`,
+            `💡 此設定只影響本伺服器，不影響其他伺服器。`,
+          ].join('\n'),
+        });
+      } else {
+        db.setSetting(cfg.key, String(ms));
+        console.log(`[config] [interval-set] global:${cfg.key} = ${ms}ms (set by ${interaction.user.tag})`);
+        return interaction.reply({
+          content: [
+            `✅ **已更新全域 ${cfg.label} 掃描間隔！**`,
+            ``,
+            `⏱️  新間隔：**${formatMs(ms)}**`,
+            `📌 下一次 tick 結束後即生效（不需重啟 Bot）`,
+            `💡 私訊中設定會作為無自訂間隔伺服器的全域預設值。`,
+          ].join('\n'),
         });
       }
-
-      const ms = minutes * 60_000;
-      db.setGuildSetting(guildId, cfg.key, String(ms));
-
-      console.log(`[config] [interval-set] guild:${guildId}:${cfg.key} = ${ms}ms (set by ${interaction.user.tag})`);
-
-      return interaction.reply({
-        content: [
-          `✅ **已更新本伺服器的 ${cfg.label} 掃描間隔！**`,
-          ``,
-          `⏱️  新間隔：**${formatMs(ms)}**`,
-          `📌 下一次 tick 結束後即生效（不需重啟 Bot）`,
-          `💡 此設定只影響本伺服器，不影響其他伺服器。`,
-        ].join('\n'),
-      });
     }
 
     // ── interval-get ─────────────────────────────────────────────────────────
@@ -211,13 +216,16 @@ module.exports = {
         return `**${cfg.label}**  →  \`${formatMs(current)}\`  (${source})`;
       });
 
+      const scopeTitle = guildId ? '（本伺服器）' : '（全域 / 私訊）';
+      const resetHint  = guildId ? '清除本伺服器設定並恢復全域預設值。' : '清除全域 DB 設定並恢復 ENV 預設值。';
+
       return interaction.reply({
         content: [
-          `⚙️ **掃描器輪詢間隔設定（本伺服器）**`,
+          `⚙️ **掃描器輪詢間隔設定${scopeTitle}**`,
           ``,
           ...lines,
           ``,
-          `使用 \`/config interval-set\` 修改，\`/config interval-reset\` 清除本伺服器設定並恢復全域預設值。`,
+          `使用 \`/config interval-set\` 修改，\`/config interval-reset\` ${resetHint}`,
         ].join('\n'),
         flags: [MessageFlags.Ephemeral],
       });
@@ -229,28 +237,35 @@ module.exports = {
       const cfg        = INTERVAL_CONFIGS[scraperKey];
       const guildId    = interaction.guildId;
 
-      if (!guildId) {
+      if (guildId) {
+        // 刪除本伺服器的設定，fallback 到全域/env
+        db.deleteGuildSetting(guildId, cfg.key);
+        const envFallback = parseInt(process.env[cfg.envKey] || String(cfg.defaultMs), 10);
+        const effectiveMs = db.getIntervalMs(cfg.key, envFallback);
+        console.log(`[config] [interval-reset] guild:${guildId}:${cfg.key} cleared by ${interaction.user.tag}, fallback = ${effectiveMs}ms`);
+
         return interaction.reply({
-          content: '❌ 此設定僅限在**伺服器頻道**中使用。',
-          flags: [MessageFlags.Ephemeral],
+          content: [
+            `🔄 **已清除本伺服器的 ${cfg.label} 掃描間隔設定！**`,
+            ``,
+            `⏱️  現在使用的間隔：**${formatMs(effectiveMs)}**（全域 / ENV 預設）`,
+            `💡 若要重新自訂，請使用 \`/config interval-set\`。`,
+          ].join('\n'),
+        });
+      } else {
+        // 私訊中：刪除全域 DB 設定，fallback 到 ENV 預設
+        db.deleteSetting(cfg.key);
+        const envFallback = parseInt(process.env[cfg.envKey] || String(cfg.defaultMs), 10);
+        console.log(`[config] [interval-reset] global:${cfg.key} cleared by ${interaction.user.tag}, fallback = ${envFallback}ms`);
+
+        return interaction.reply({
+          content: [
+            `🔄 **已清除全域 ${cfg.label} 掃描間隔設定！**`,
+            ``,
+            `⏱️  恢復為 ENV 預設值：**${formatMs(envFallback)}**`,
+          ].join('\n'),
         });
       }
-
-      // 刪除本伺服器的設定，fallback 到全域/env
-      db.deleteGuildSetting(guildId, cfg.key);
-
-      const envFallback = parseInt(process.env[cfg.envKey] || String(cfg.defaultMs), 10);
-      const effectiveMs = db.getIntervalMs(cfg.key, envFallback);
-      console.log(`[config] [interval-reset] guild:${guildId}:${cfg.key} cleared by ${interaction.user.tag}, fallback = ${effectiveMs}ms`);
-
-      return interaction.reply({
-        content: [
-          `🔄 **已清除本伺服器的 ${cfg.label} 掃描間隔設定！**`,
-          ``,
-          `⏱️  現在使用的間隔：**${formatMs(effectiveMs)}**（全域 / ENV 預設）`,
-          `💡 若要重新自訂，請使用 \`/config interval-set\`。`,
-        ].join('\n'),
-      });
     }
     // ── hours-set ────────────────────────────────────────────────────────────
     if (sub === 'hours-set') {
