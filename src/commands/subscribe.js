@@ -2,7 +2,7 @@
 
 const { SlashCommandBuilder, ChannelType, MessageFlags } = require('discord.js');
 const db = require('../database');
-const { crawlBoard, matchKeyword, matchAuthor, fetchBoardPage, parseArticles } = require('../scraper');
+const { crawlBoard, matchKeyword, matchAuthor } = require('../scraper');
 const { sendNotifications } = require('../notifier');
 
 module.exports = {
@@ -80,16 +80,13 @@ module.exports = {
 
       // --- Instant Verification ---
       try {
-        // Fetch current articles (pass null to get everything on page)
-        const { currentNewestAid } = await crawlBoard(board, null);
-        
-        const html = await fetchBoardPage(board);
-        const articles = parseArticles(html);
+        // Fetch current articles via crawlBoard (reuses the same HTTP request)
+        const { allArticles, currentNewestAid } = await crawlBoard(board, null);
 
-        // Find the LATEST (last in the reversed array) that matches
+        // Find the LATEST (last in the array) that matches
         let lastMatch = null;
-        for (let i = articles.length - 1; i >= 0; i--) {
-          const a = articles[i];
+        for (let i = allArticles.length - 1; i >= 0; i--) {
+          const a = allArticles[i];
           const matched = (type === 'keyword') ? matchKeyword(a.title, matchValue) : matchAuthor(a.author, matchValue);
           if (matched) {
             lastMatch = a;

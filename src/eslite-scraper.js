@@ -79,10 +79,10 @@ function flattenProducts(data) {
     if (!products.has(guid)) {
       products.set(guid, {
         guid,
-        name:   p.name || '(未知商品)',
-        stock:  typeof p.stock === 'number' ? p.stock : 0,
+        name: p.name || '(未知商品)',
+        stock: typeof p.stock === 'number' ? p.stock : 0,
         status: p.status || '',
-        url:    `${ESLITE_PRODUCT_BASE}/${guid}`,
+        url: `${ESLITE_PRODUCT_BASE}/${guid}`,
       });
     }
   }
@@ -115,11 +115,11 @@ async function snapshotExhibition(exhibitionId) {
 
   for (const p of products) {
     snapshot.set(p.guid, {
-      guid:    p.guid,
-      name:    p.name,
-      url:     p.url,
-      stock:   p.stock,
-      status:  p.status,
+      guid: p.guid,
+      name: p.name,
+      url: p.url,
+      stock: p.stock,
+      status: p.status,
       inStock: isInStock(p),
     });
   }
@@ -157,11 +157,11 @@ function detectRestocks(prevSnapshot, currSnapshot) {
       if (curr.inStock) {
         restocks.push({
           guid,
-          name:         curr.name,
-          url:          curr.url,
-          prevStock:    0,
-          currStock:    curr.stock,
-          status:       curr.status,
+          name: curr.name,
+          url: curr.url,
+          prevStock: 0,
+          currStock: curr.stock,
+          status: curr.status,
           isNewProduct: true,
         });
       }
@@ -172,11 +172,11 @@ function detectRestocks(prevSnapshot, currSnapshot) {
     if (!prev.inStock && curr.inStock) {
       restocks.push({
         guid,
-        name:         curr.name,
-        url:          curr.url,
-        prevStock:    prev.stock,
-        currStock:    curr.stock,
-        status:       curr.status,
+        name: curr.name,
+        url: curr.url,
+        prevStock: prev.stock,
+        currStock: curr.stock,
+        status: curr.status,
         isNewProduct: false,
       });
     }

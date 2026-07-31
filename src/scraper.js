@@ -182,11 +182,11 @@ async function crawlBoard(board, lastAid) {
 
   if (!lastAid) {
     // First time: anchor at current newest, no notifications
-    return { newArticles: [], currentNewestAid };
+    return { newArticles: [], allArticles, currentNewestAid };
   }
 
   const newArticles = filterNewArticles(allArticles, lastAid);
-  return { newArticles, currentNewestAid };
+  return { newArticles, allArticles, currentNewestAid };
 }
 
 module.exports = {

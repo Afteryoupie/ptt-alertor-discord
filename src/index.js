@@ -4,9 +4,9 @@ require('dotenv').config();
 
 const { Client, GatewayIntentBits, Collection, MessageFlags } = require('discord.js');
 const path = require('path');
-const fs   = require('fs');
+const fs = require('fs');
 
-const db                  = require('./database');
+const db = require('./database');
 const { crawlBoard, matchKeyword, matchAuthor } = require('./scraper');
 const { sendNotifications, sendRestockNotifications, sendEsliteRestockNotifications, sendMomoRestockNotifications, sendShopeeRestockNotifications } = require('./notifier');
 const {
@@ -37,15 +37,15 @@ const {
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
-const TOKEN        = process.env.DISCORD_TOKEN;
-const COOLDOWN_MS  = parseInt(process.env.COOLDOWN_MS || '5000', 10); // 5s between boards
+const TOKEN = process.env.DISCORD_TOKEN;
+const COOLDOWN_MS = parseInt(process.env.COOLDOWN_MS || '5000', 10); // 5s between boards
 
 // ENV fallback defaults (used when DB has no override)
 const ENV_INTERVALS = {
-  poll_interval_ms:        parseInt(process.env.POLL_INTERVAL_MS        || '300000', 10),
-  shop_poll_interval_ms:   parseInt(process.env.SHOP_POLL_INTERVAL_MS   || '300000', 10),
+  poll_interval_ms: parseInt(process.env.POLL_INTERVAL_MS || '300000', 10),
+  shop_poll_interval_ms: parseInt(process.env.SHOP_POLL_INTERVAL_MS || '300000', 10),
   eslite_poll_interval_ms: parseInt(process.env.ESLITE_POLL_INTERVAL_MS || '300000', 10),
-  momo_poll_interval_ms:   parseInt(process.env.MOMO_POLL_INTERVAL_MS   || '300000', 10),
+  momo_poll_interval_ms: parseInt(process.env.MOMO_POLL_INTERVAL_MS || '300000', 10),
   shopee_poll_interval_ms: parseInt(process.env.SHOPEE_POLL_INTERVAL_MS || '300000', 10),
 };
 
@@ -60,8 +60,8 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds],
   // Disable unused caches to reduce memory footprint
   makeCache: require('discord.js').Options.cacheWithLimits({
-    MessageManager:   0,
-    PresenceManager:  0,
+    MessageManager: 0,
+    PresenceManager: 0,
     GuildMemberManager: 200,
   }),
 });
@@ -80,13 +80,13 @@ for (const file of fs.readdirSync(commandsDir).filter(f => f.endsWith('.js'))) {
 
 client.once('clientReady', () => {
   console.log(`[startup] ✅ Logged in as ${client.user.tag}`);
-  
+
   const getOpHours = (key) => `${db.getSetting(key + '_op_hour_start') || '10'}:00-${db.getSetting(key + '_op_hour_end') || '19'}:00`;
 
-  console.log(`[startup] 🕒 PTT interval:    ${db.getIntervalMs('poll_interval_ms',        ENV_INTERVALS.poll_interval_ms) / 1000}s (${getOpHours('ptt')})`);
-  console.log(`[startup] 🛒 Shop interval:   ${db.getIntervalMs('shop_poll_interval_ms',   ENV_INTERVALS.shop_poll_interval_ms) / 1000}s (${getOpHours('shop')})`);
+  console.log(`[startup] 🕒 PTT interval:    ${db.getIntervalMs('poll_interval_ms', ENV_INTERVALS.poll_interval_ms) / 1000}s (${getOpHours('ptt')})`);
+  console.log(`[startup] 🛒 Shop interval:   ${db.getIntervalMs('shop_poll_interval_ms', ENV_INTERVALS.shop_poll_interval_ms) / 1000}s (${getOpHours('shop')})`);
   console.log(`[startup] 🏬 Eslite interval: ${db.getIntervalMs('eslite_poll_interval_ms', ENV_INTERVALS.eslite_poll_interval_ms) / 1000}s (${getOpHours('eslite')})`);
-  console.log(`[startup] 🛍️  Momo interval:  ${db.getIntervalMs('momo_poll_interval_ms',   ENV_INTERVALS.momo_poll_interval_ms) / 1000}s (${getOpHours('momo')})`);
+  console.log(`[startup] 🛍️  Momo interval:  ${db.getIntervalMs('momo_poll_interval_ms', ENV_INTERVALS.momo_poll_interval_ms) / 1000}s (${getOpHours('momo')})`);
   console.log(`[startup] 🟠 Shopee interval:${db.getIntervalMs('shopee_poll_interval_ms', ENV_INTERVALS.shopee_poll_interval_ms) / 1000}s (${getOpHours('shopee')})`);
   startScraperLoop();
   startShopScraperLoop();
@@ -106,9 +106,9 @@ client.on('interactionCreate', async interaction => {
       console.error(`[commands] Error in /${interaction.commandName}:`, err);
       const msg = { content: '❌ 指令執行發生錯誤，請稍後再試。', flags: [MessageFlags.Ephemeral] };
       if (interaction.replied || interaction.deferred) {
-        await interaction.followUp(msg).catch(() => {});
+        await interaction.followUp(msg).catch(() => { });
       } else {
-        await interaction.reply(msg).catch(() => {});
+        await interaction.reply(msg).catch(() => { });
       }
     }
   } else if (interaction.isAutocomplete()) {
@@ -199,9 +199,9 @@ function startScraperLoop() {
                 allMatches.push({
                   article,
                   board,
-                  matchType:  sub.type,
+                  matchType: sub.type,
                   matchValue: sub.match_value,
-                  targetId:   sub.target_id,
+                  targetId: sub.target_id,
                   targetType: sub.target_type,
                 });
                 notifiedInThisCycle.add(dupKey);
@@ -325,9 +325,9 @@ function startShopScraperLoop() {
               allRestockMatches.push({
                 restock,
                 categoryUrl,
-                targetId:     sub.target_id,
-                targetType:   sub.target_type,
-                userId:       sub.user_id,
+                targetId: sub.target_id,
+                targetType: sub.target_type,
+                userId: sub.user_id,
               });
             }
           }
@@ -438,9 +438,9 @@ function startEsliteScraperLoop() {
               allRestockMatches.push({
                 restock,
                 exhibitionId,
-                targetId:   sub.target_id,
+                targetId: sub.target_id,
                 targetType: sub.target_type,
-                userId:     sub.user_id,
+                userId: sub.user_id,
               });
             }
           }
@@ -554,9 +554,9 @@ function startMomoScraperLoop() {
               allEventMatches.push({
                 event,
                 categoryUrl: categoryFullUrl,
-                targetId:    sub.target_id,
-                targetType:  sub.target_type,
-                userId:      sub.user_id,
+                targetId: sub.target_id,
+                targetType: sub.target_type,
+                userId: sub.user_id,
               });
             }
           }
@@ -680,7 +680,7 @@ function startShopeeScraperLoop() {
 
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
 
-process.on('SIGINT',  shutdown);
+process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 function shutdown() {
@@ -707,9 +707,9 @@ function isWithinOperatingHours(scraperKey) {
   const defaultEnd = '19';
 
   const startHourStr = db.getSetting(`${scraperKey}_op_hour_start`) || defaultStart;
-  const endHourStr   = db.getSetting(`${scraperKey}_op_hour_end`) || defaultEnd;
-  const startHour    = parseInt(startHourStr, 10);
-  const endHour      = parseInt(endHourStr, 10);
+  const endHourStr = db.getSetting(`${scraperKey}_op_hour_end`) || defaultEnd;
+  const startHour = parseInt(startHourStr, 10);
+  const endHour = parseInt(endHourStr, 10);
 
   const now = new Date();
   const hour = parseInt(
@@ -720,7 +720,7 @@ function isWithinOperatingHours(scraperKey) {
     }).format(now),
     10
   );
-  
+
   if (startHour <= endHour) {
     // Normal range, e.g., 10 to 19 (inclusive of 10, up to 18:59)
     return hour >= startHour && hour < endHour;
