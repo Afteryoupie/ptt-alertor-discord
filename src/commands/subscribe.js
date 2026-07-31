@@ -113,9 +113,9 @@ module.exports = {
           });
         }
 
-        // Also, if this is a brand new board for the whole system,
-        // initialize its state so we don't spam old posts in the next loop.
-        if (!db.getBoardState(board) && currentNewestAid) {
+        // Always update board state with the newest AID seen during instant verification
+        // so that the background scraper loop won't notify old/verified articles again.
+        if (currentNewestAid) {
           db.upsertBoardState(board, currentNewestAid);
         }
 

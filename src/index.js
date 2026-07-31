@@ -290,6 +290,11 @@ function startShopScraperLoop() {
           // Fetch fresh snapshot
           const currSnapshot = await snapshotCategory(categoryPath);
 
+          if (!currSnapshot || currSnapshot.size === 0) {
+            console.warn(`[shop] [${categoryUrl}] ⚠️ 抓取結果為空快照，跳過更新以防誤判庫存變動。`);
+            continue;
+          }
+
           // Load previous snapshot
           const prevRaw = db.getShopSnapshot(categoryUrl);
           const prevSnapshot = prevRaw ? deserializeSnapshot(prevRaw) : null;
@@ -397,6 +402,11 @@ function startEsliteScraperLoop() {
         try {
           // Fetch fresh snapshot
           const currSnapshot = await snapshotExhibition(exhibitionId);
+
+          if (!currSnapshot || currSnapshot.size === 0) {
+            console.warn(`[eslite] [${exhibitionId}] ⚠️ 抓取結果為空快照，跳過更新以防誤判庫存變動。`);
+            continue;
+          }
 
           // Load previous snapshot
           const prevRaw = db.getEsliteSnapshot(exhibitionId);
@@ -509,6 +519,11 @@ function startMomoScraperLoop() {
           // Fetch fresh snapshot (max 2 pages)
           const currSnapshot = await snapshotMomoCategory(cateCode, cateType, 2);
 
+          if (!currSnapshot || currSnapshot.size === 0) {
+            console.warn(`[momo] [${categoryFullUrl}] ⚠️ 抓取結果為空快照，跳過更新以防誤判庫存變動。`);
+            continue;
+          }
+
           // Load previous snapshot
           const prevRaw = db.getMomoSnapshot(categoryFullUrl);
           const prevSnapshot = prevRaw ? deserializeMomoSnapshot(prevRaw) : null;
@@ -605,6 +620,13 @@ function startShopeeScraperLoop() {
         try {
           const newSnap = await snapshotShopeeSearch({ shopId: shop_id, keyword });
           const oldSnap = db.getShopeeSnapshot(search_url);
+
+          // Guard against transient category fetch failure
+          if (keyword && oldSnap && oldSnap.matchedCategory && !newSnap.matchedCategory) {
+            console.warn(`[shopee] ⚠️ [${search_url}] 分類擷取暫時失敗，跳過更新快照。`);
+            continue;
+          }
+
           db.upsertShopeeSnapshot(search_url, newSnap);
 
           if (!oldSnap) {

@@ -61,6 +61,9 @@ async function fetchBoardPage(board) {
 function parseArticles(html) {
   const articles = [];
 
+  // Exclude pinned/sticky posts located below the r-list-sep divider
+  const mainHtml = html.split(/<div class="r-list-sep"/i)[0];
+
   // Match each article entry block
   // <div class="r-ent">...<a href="/bbs/BOARD/M.XXXXXXX.A.XXX.html">TITLE</a>...
   const entryRe = /<div class="r-ent">([\s\S]*?)<\/div>\s*<\/div>/g;
@@ -71,7 +74,7 @@ function parseArticles(html) {
   const annRe = /^\[公告\]/; // Announcement filter
 
   let match;
-  while ((match = entryRe.exec(html)) !== null) {
+  while ((match = entryRe.exec(mainHtml)) !== null) {
     const block = match[1];
 
     // Skip deleted posts

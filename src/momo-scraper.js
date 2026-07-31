@@ -219,15 +219,8 @@ async function snapshotCategory(cateCode, cateType = 'd', maxPages = DEFAULT_MAX
     const itemCode = `TP_${cateCode}`;
 
     if (res.status !== 200) {
-      snapshot.set(itemCode, {
-        goodsCode: itemCode,
-        name: `[${tpId}] ${kw || '商品'}`,
-        url: targetUrl,
-        stock: 0,
-        onSaleDescription: '無貨轉跳中',
-        status: 'out_of_stock',
-      });
-      return snapshot;
+      console.warn(`[momo] TP store HTTP ${res.status} for ${cateCode}, returning empty snapshot.`);
+      return snapshot; // Returns empty Map so scraper loop guards against it
     }
 
     const html = await res.text();
