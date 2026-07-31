@@ -103,6 +103,7 @@ module.exports = {
         target_id:    targetId,
         target_type:  targetType,
         category_url: categoryUrl,
+        guild_id:     interaction.guildId || '',
       });
 
       return interaction.reply({

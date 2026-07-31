@@ -139,6 +139,37 @@ db.exec(`
     created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- Per-guild PTT board state (last seen article ID per guild per board)
+  CREATE TABLE IF NOT EXISTS guild_board_state (
+    guild_id TEXT NOT NULL,
+    board    TEXT NOT NULL COLLATE NOCASE,
+    last_aid TEXT,
+    PRIMARY KEY (guild_id, board)
+  );
+
+  -- PTT article thread (push) monitoring subscriptions
+  CREATE TABLE IF NOT EXISTS ptt_thread_subscriptions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      TEXT NOT NULL,
+    target_id    TEXT NOT NULL,
+    target_type  TEXT NOT NULL CHECK(target_type IN ('channel', 'dm')),
+    article_url  TEXT NOT NULL,
+    keyword      TEXT NOT NULL DEFAULT '',
+    guild_id     TEXT NOT NULL DEFAULT '',
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_thread_subs_url  ON ptt_thread_subscriptions(article_url);
+  CREATE INDEX IF NOT EXISTS idx_thread_subs_user ON ptt_thread_subscriptions(user_id);
+
+  -- PTT thread state: tracks last seen push offset per article
+  CREATE TABLE IF NOT EXISTS ptt_thread_state (
+    article_url  TEXT PRIMARY KEY,
+    poll_offset  TEXT,
+    push_count   INTEGER NOT NULL DEFAULT 0,
+    updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // Safe migration: add new columns to existing DBs
@@ -152,6 +183,12 @@ const profileColumns = [
 ];
 for (const [col, type] of profileColumns) {
   try { db.exec(`ALTER TABLE autobuy_configs ADD COLUMN ${col} ${type}`); } catch (_) {}
+}
+
+// Safe migration: add guild_id to all subscription tables
+const subTables = ['subscriptions', 'shop_subscriptions', 'eslite_subscriptions', 'momo_subscriptions', 'shopee_subscriptions'];
+for (const table of subTables) {
+  try { db.exec(`ALTER TABLE ${table} ADD COLUMN guild_id TEXT NOT NULL DEFAULT ''`); } catch (_) {}
 }
 
 // ─── Prepared Statements ────────────────────────────────────────────────────
@@ -257,8 +294,84 @@ const stmts = {
       updated_at = CURRENT_TIMESTAMP
   `),
 
+  deleteSetting: db.prepare(`
+    DELETE FROM settings WHERE key = @key
+  `),
+
+  getSettingsByPattern: db.prepare(`
+    SELECT key, value FROM settings WHERE key LIKE @pattern
+  `),
+
   getAllSettings: db.prepare(`
     SELECT key, value, updated_at FROM settings ORDER BY key
+  `),
+
+  // ── Per-guild board state ─────────────────────────────────────────────────
+
+  getGuildBoardState: db.prepare(`
+    SELECT last_aid FROM guild_board_state WHERE guild_id = @guild_id AND board = @board
+  `),
+
+  setGuildBoardState: db.prepare(`
+    INSERT INTO guild_board_state (guild_id, board, last_aid)
+    VALUES (@guild_id, @board, @last_aid)
+    ON CONFLICT(guild_id, board) DO UPDATE SET last_aid = excluded.last_aid
+  `),
+
+  getDistinctGuildsForBoard: db.prepare(`
+    SELECT DISTINCT guild_id FROM subscriptions WHERE board = @board
+  `),
+
+  getSubsForBoardAndGuild: db.prepare(`
+    SELECT id, user_id, target_id, target_type, type, match_value
+    FROM subscriptions
+    WHERE board = @board AND guild_id = @guild_id
+  `),
+
+  // ── PTT thread (article push) subscriptions ───────────────────────────────
+
+  addThreadSubscription: db.prepare(`
+    INSERT INTO ptt_thread_subscriptions (user_id, target_id, target_type, article_url, keyword, guild_id)
+    VALUES (@user_id, @target_id, @target_type, @article_url, @keyword, @guild_id)
+  `),
+
+  removeThreadSubscription: db.prepare(`
+    DELETE FROM ptt_thread_subscriptions WHERE id = @id AND user_id = @user_id
+  `),
+
+  listThreadByUser: db.prepare(`
+    SELECT id, article_url, keyword, target_type
+    FROM ptt_thread_subscriptions
+    WHERE user_id = @user_id AND target_id = @target_id
+    ORDER BY id ASC
+  `),
+
+  getAllThreadArticles: db.prepare(`
+    SELECT DISTINCT article_url FROM ptt_thread_subscriptions
+  `),
+
+  getThreadSubsForArticle: db.prepare(`
+    SELECT id, user_id, target_id, target_type, keyword
+    FROM ptt_thread_subscriptions
+    WHERE article_url = @article_url
+  `),
+
+  findThreadSubscription: db.prepare(`
+    SELECT id FROM ptt_thread_subscriptions
+    WHERE user_id = @user_id AND target_id = @target_id AND article_url = @article_url AND keyword = @keyword
+  `),
+
+  getThreadState: db.prepare(`
+    SELECT poll_offset, push_count FROM ptt_thread_state WHERE article_url = @article_url
+  `),
+
+  upsertThreadState: db.prepare(`
+    INSERT INTO ptt_thread_state (article_url, poll_offset, push_count, updated_at)
+    VALUES (@article_url, @poll_offset, @push_count, CURRENT_TIMESTAMP)
+    ON CONFLICT(article_url) DO UPDATE SET
+      poll_offset = excluded.poll_offset,
+      push_count  = excluded.push_count,
+      updated_at  = CURRENT_TIMESTAMP
   `),
 
   // ── Eslite restock ──────────────────────────────────────────────────────
@@ -558,6 +671,126 @@ function getAllSettings() {
   return stmts.getAllSettings.all();
 }
 
+// ─── Guild-Scoped Settings API ───────────────────────────────────────────────
+
+/**
+ * Get a guild-specific setting. Key stored as `guild:{guildId}:{key}`.
+ * @param {string} guildId
+ * @param {string} key
+ * @returns {string|undefined}
+ */
+function getGuildSetting(guildId, key) {
+  if (!guildId) return undefined;
+  const row = stmts.getSetting.get({ key: `guild:${guildId}:${key}` });
+  return row ? row.value : undefined;
+}
+
+/**
+ * Set a guild-specific setting.
+ * @param {string} guildId
+ * @param {string} key
+ * @param {string} value
+ */
+function setGuildSetting(guildId, key, value) {
+  if (!guildId) return;
+  stmts.setSetting.run({ key: `guild:${guildId}:${key}`, value });
+}
+
+/**
+ * Delete a guild-specific setting (revert to global/env).
+ * @param {string} guildId
+ * @param {string} key
+ */
+function deleteGuildSetting(guildId, key) {
+  if (!guildId) return;
+  stmts.deleteSetting.run({ key: `guild:${guildId}:${key}` });
+}
+
+/**
+ * Get the effective interval for a guild.
+ * Priority: guild-specific setting → global DB setting → env fallback
+ * @param {string} guildId
+ * @param {string} key
+ * @param {number} envFallback
+ * @returns {number}
+ */
+function getGuildIntervalMs(guildId, key, envFallback) {
+  const guildVal = getGuildSetting(guildId, key);
+  if (guildVal !== undefined) {
+    const parsed = parseInt(guildVal, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return getIntervalMs(key, envFallback);
+}
+
+/**
+ * Get the minimum interval across all guilds and the global setting.
+ * Used to determine how often the scraper loop should tick.
+ * @param {string} key
+ * @param {number} envFallback
+ * @returns {number}
+ */
+function getMinIntervalMsAcrossGuilds(key, envFallback) {
+  const globalInterval = getIntervalMs(key, envFallback);
+  const pattern = `guild:%:${key}`;
+  const rows = stmts.getSettingsByPattern.all({ pattern });
+  let minMs = globalInterval;
+  for (const row of rows) {
+    const val = parseInt(row.value, 10);
+    if (!isNaN(val) && val > 0) minMs = Math.min(minMs, val);
+  }
+  return minMs;
+}
+
+// ─── Per-Guild Board State API ───────────────────────────────────────────────
+
+/**
+ * Get the per-guild last seen article ID for a board.
+ * Falls back to global board_state for guild_id = '' (legacy subscriptions).
+ * @param {string} guildId
+ * @param {string} board
+ * @returns {string|null}
+ */
+function getGuildBoardState(guildId, board) {
+  if (!guildId) return getBoardState(board);
+  const row = stmts.getGuildBoardState.get({ guild_id: guildId, board });
+  return row ? row.last_aid : null;
+}
+
+/**
+ * Set the per-guild last seen article ID for a board.
+ * Falls back to global board_state for guild_id = '' (legacy subscriptions).
+ * @param {string} guildId
+ * @param {string} board
+ * @param {string} lastAid
+ */
+function setGuildBoardState(guildId, board, lastAid) {
+  if (!guildId) {
+    upsertBoardState(board, lastAid);
+    return;
+  }
+  stmts.setGuildBoardState.run({ guild_id: guildId, board, last_aid: lastAid });
+}
+
+/**
+ * Get all distinct guild IDs that have subscriptions for a board.
+ * @param {string} board
+ * @returns {string[]}
+ */
+function getDistinctGuildsForBoard(board) {
+  return stmts.getDistinctGuildsForBoard.all({ board }).map(r => r.guild_id);
+}
+
+/**
+ * Get all subscriptions for a specific board AND guild.
+ * @param {string} board
+ * @param {string} guildId
+ * @returns {object[]}
+ */
+function getSubsForBoardAndGuild(board, guildId) {
+  return stmts.getSubsForBoardAndGuild.all({ board, guild_id: guildId });
+}
+
 // ─── Eslite Restock API ─────────────────────────────────────────────────────
 
 /** Add an eslite exhibition restock subscription. */
@@ -783,9 +1016,58 @@ function removeSubscriptionByPlatform({ platform, id, user_id }) {
       return removeEsliteSubscription({ id, user_id });
     case 'shopee':
       return removeShopeeSubscription({ id, user_id });
+    case 'thread':
+      return removeThreadSubscription({ id, user_id });
     default:
       return 0;
   }
+}
+
+// ─── PTT Thread (Push) Subscription API ──────────────────────────────────────────
+
+/** Add a thread push subscription. */
+function addThreadSubscription(params) {
+  const result = stmts.addThreadSubscription.run(params);
+  return result.lastInsertRowid;
+}
+
+/** Remove a thread push subscription (only if owned by user_id). */
+function removeThreadSubscription({ id, user_id }) {
+  return stmts.removeThreadSubscription.run({ id, user_id }).changes;
+}
+
+/** List all thread push subscriptions for a user in a channel/dm. */
+function listThreadSubscriptions({ user_id, target_id }) {
+  return stmts.listThreadByUser.all({ user_id, target_id });
+}
+
+/** Get all distinct article URLs that have at least one thread subscription. */
+function getAllThreadArticles() {
+  return stmts.getAllThreadArticles.all().map(r => r.article_url);
+}
+
+/** Get all thread subscriptions for a specific article URL. */
+function getThreadSubsForArticle(article_url) {
+  return stmts.getThreadSubsForArticle.all({ article_url });
+}
+
+/** Check if a thread subscription already exists. */
+function findThreadSubscription(params) {
+  return stmts.findThreadSubscription.get(params);
+}
+
+/** Get the stored state (poll_offset, push_count) for a thread article. */
+function getThreadState(article_url) {
+  return stmts.getThreadState.get({ article_url }) || null;
+}
+
+/** Save/update the state for a thread article. */
+function upsertThreadState(article_url, pollOffset, pushCount) {
+  stmts.upsertThreadState.run({
+    article_url,
+    poll_offset: pollOffset,
+    push_count:  pushCount,
+  });
 }
 
 module.exports = {
@@ -805,6 +1087,17 @@ module.exports = {
   // unified
   getUserAllSubscriptions,
   removeSubscriptionByPlatform,
+  // guild-scoped settings
+  getGuildSetting,
+  setGuildSetting,
+  deleteGuildSetting,
+  getGuildIntervalMs,
+  getMinIntervalMsAcrossGuilds,
+  // guild-scoped board state (PTT)
+  getGuildBoardState,
+  setGuildBoardState,
+  getDistinctGuildsForBoard,
+  getSubsForBoardAndGuild,
   // shop
   addShopSubscription,
   removeShopSubscription,
@@ -841,5 +1134,14 @@ module.exports = {
   findShopeeSubscription,
   getShopeeSnapshot,
   upsertShopeeSnapshot,
+  // ptt thread (push) monitoring
+  addThreadSubscription,
+  removeThreadSubscription,
+  listThreadSubscriptions,
+  getAllThreadArticles,
+  getThreadSubsForArticle,
+  findThreadSubscription,
+  getThreadState,
+  upsertThreadState,
 };
 

@@ -8,7 +8,8 @@ const fs = require('fs');
 
 const db = require('./database');
 const { crawlBoard, matchKeyword, matchAuthor } = require('./scraper');
-const { sendNotifications, sendRestockNotifications, sendEsliteRestockNotifications, sendMomoRestockNotifications, sendShopeeRestockNotifications } = require('./notifier');
+const { crawlArticle, matchPushKeyword } = require('./thread-scraper');
+const { sendNotifications, sendRestockNotifications, sendEsliteRestockNotifications, sendMomoRestockNotifications, sendShopeeRestockNotifications, sendThreadPushNotifications } = require('./notifier');
 const {
   snapshotCategory,
   detectRestocks,
@@ -43,6 +44,7 @@ const COOLDOWN_MS = parseInt(process.env.COOLDOWN_MS || '5000', 10); // 5s betwe
 // ENV fallback defaults (used when DB has no override)
 const ENV_INTERVALS = {
   poll_interval_ms: parseInt(process.env.POLL_INTERVAL_MS || '300000', 10),
+  thread_poll_interval_ms: parseInt(process.env.THREAD_POLL_INTERVAL_MS || '180000', 10), // 3 min
   shop_poll_interval_ms: parseInt(process.env.SHOP_POLL_INTERVAL_MS || '300000', 10),
   eslite_poll_interval_ms: parseInt(process.env.ESLITE_POLL_INTERVAL_MS || '300000', 10),
   momo_poll_interval_ms: parseInt(process.env.MOMO_POLL_INTERVAL_MS || '300000', 10),
@@ -83,12 +85,14 @@ client.once('clientReady', () => {
 
   const getOpHours = (key) => `${db.getSetting(key + '_op_hour_start') || '10'}:00-${db.getSetting(key + '_op_hour_end') || '19'}:00`;
 
-  console.log(`[startup] 🕒 PTT interval:    ${db.getIntervalMs('poll_interval_ms', ENV_INTERVALS.poll_interval_ms) / 1000}s (${getOpHours('ptt')})`);
-  console.log(`[startup] 🛒 Shop interval:   ${db.getIntervalMs('shop_poll_interval_ms', ENV_INTERVALS.shop_poll_interval_ms) / 1000}s (${getOpHours('shop')})`);
-  console.log(`[startup] 🏬 Eslite interval: ${db.getIntervalMs('eslite_poll_interval_ms', ENV_INTERVALS.eslite_poll_interval_ms) / 1000}s (${getOpHours('eslite')})`);
-  console.log(`[startup] 🛍️  Momo interval:  ${db.getIntervalMs('momo_poll_interval_ms', ENV_INTERVALS.momo_poll_interval_ms) / 1000}s (${getOpHours('momo')})`);
-  console.log(`[startup] 🟠 Shopee interval:${db.getIntervalMs('shopee_poll_interval_ms', ENV_INTERVALS.shopee_poll_interval_ms) / 1000}s (${getOpHours('shopee')})`);
+  console.log(`[startup] 🕒 PTT interval:    min ${db.getMinIntervalMsAcrossGuilds('poll_interval_ms', ENV_INTERVALS.poll_interval_ms) / 1000}s (varies by guild) (${getOpHours('ptt')})`);
+  console.log(`[startup] 💬 Thread interval: min ${db.getMinIntervalMsAcrossGuilds('thread_poll_interval_ms', ENV_INTERVALS.thread_poll_interval_ms) / 1000}s (${getOpHours('ptt')})`);
+  console.log(`[startup] 🛒 Shop interval:   min ${db.getMinIntervalMsAcrossGuilds('shop_poll_interval_ms', ENV_INTERVALS.shop_poll_interval_ms) / 1000}s (${getOpHours('shop')})`);
+  console.log(`[startup] 🏬 Eslite interval: min ${db.getMinIntervalMsAcrossGuilds('eslite_poll_interval_ms', ENV_INTERVALS.eslite_poll_interval_ms) / 1000}s (${getOpHours('eslite')})`);
+  console.log(`[startup] 🛍️  Momo interval:  min ${db.getMinIntervalMsAcrossGuilds('momo_poll_interval_ms', ENV_INTERVALS.momo_poll_interval_ms) / 1000}s (${getOpHours('momo')})`);
+  console.log(`[startup] 🟠 Shopee interval: min ${db.getMinIntervalMsAcrossGuilds('shopee_poll_interval_ms', ENV_INTERVALS.shopee_poll_interval_ms) / 1000}s (${getOpHours('shopee')})`);
   startScraperLoop();
+  startThreadScraperLoop();
   startShopScraperLoop();
   startEsliteScraperLoop();
   startMomoScraperLoop();
@@ -128,12 +132,10 @@ client.on('interactionCreate', async interaction => {
 /**
  * Core scraper loop:
  * 1. Fetch all subscribed boards (distinct)
- * 2. For each board: crawl PTT, find new articles, match subscriptions
- * 3. Collect all matches and send notifications in batches
- * 4. Wait POLL_INTERVAL ms, then repeat
- *
- * Key optimization: each board is crawled ONCE regardless of how many
- * users subscribed to it — then all matches are processed in-memory.
+ * 2. For each board: crawl PTT, find new articles PER GUILD
+ * 3. Each guild has its own interval and last_aid tracking
+ * 4. Collect per-guild matches and send notifications
+ * 5. Wait for the minimum interval across all guilds, then repeat
  */
 function startScraperLoop() {
   let running = false;
@@ -160,53 +162,72 @@ function startScraperLoop() {
 
       console.log(`[scraper] === 開始掃描循環 (${boards.length} 個看板) ===`);
       const allMatches = [];
+      const now = Date.now();
 
       for (const board of boards) {
         try {
-          const lastAid = db.getBoardState(board);
-          const { newArticles, currentNewestAid } = await crawlBoard(board, lastAid);
+          // Crawl board once; reuse allArticles for all guilds
+          const { allArticles, currentNewestAid } = await crawlBoard(board, null);
+          const guilds = db.getDistinctGuildsForBoard(board);
 
-          // Update board state with newest AID seen (even if no new articles)
-          if (currentNewestAid) {
-            db.upsertBoardState(board, currentNewestAid);
-          }
+          for (const guildId of guilds) {
+            const guildInterval = db.getGuildIntervalMs(
+              guildId,
+              'poll_interval_ms',
+              ENV_INTERVALS.poll_interval_ms
+            );
+            const lastCheckMs = parseInt(
+              db.getGuildSetting(guildId, 'ptt_last_check') || '0',
+              10
+            );
 
-          if (!newArticles.length) {
-            // No new articles since last check
-            continue;
-          }
+            // Skip guilds that are not due for a check yet
+            if (now - lastCheckMs < guildInterval) continue;
 
-          const subs = db.getSubsForBoard(board);
-          console.log(`[scraper] [${board}] 發現 ${newArticles.length} 篇新文章，比對 ${subs.length} 筆訂閱中...`);
+            const guildLastAid = db.getGuildBoardState(guildId, board);
 
-          // Track (targetId + aid) to avoid duplicate notifications for the same article in one target
-          const notifiedInThisCycle = new Set();
+            // First time this guild has seen this board — anchor and skip notifications
+            if (!guildLastAid) {
+              if (currentNewestAid) db.setGuildBoardState(guildId, board, currentNewestAid);
+              if (guildId) db.setGuildSetting(guildId, 'ptt_last_check', String(now));
+              continue;
+            }
 
-          for (const article of newArticles) {
-            for (const sub of subs) {
-              const dupKey = `${sub.target_id}-${article.aid}`;
-              if (notifiedInThisCycle.has(dupKey)) continue;
+            const guildNewArticles = allArticles.filter(a => a.aid > guildLastAid);
 
-              let matched = false;
+            if (guildNewArticles.length > 0) {
+              const subs = db.getSubsForBoardAndGuild(board, guildId);
+              console.log(`[scraper] [${board}] [guild:${guildId || 'global'}] 發現 ${guildNewArticles.length} 篇新文章，比對 ${subs.length} 筆訂閱中…`);
 
-              if (sub.type === 'keyword') {
-                matched = matchKeyword(article.title, sub.match_value);
-              } else if (sub.type === 'author') {
-                matched = matchAuthor(article.author, sub.match_value);
-              }
+              // Deduplicate within this guild's cycle
+              const notifiedInThisCycle = new Set();
+              for (const article of guildNewArticles) {
+                for (const sub of subs) {
+                  const dupKey = `${sub.target_id}-${article.aid}`;
+                  if (notifiedInThisCycle.has(dupKey)) continue;
 
-              if (matched) {
-                allMatches.push({
-                  article,
-                  board,
-                  matchType: sub.type,
-                  matchValue: sub.match_value,
-                  targetId: sub.target_id,
-                  targetType: sub.target_type,
-                });
-                notifiedInThisCycle.add(dupKey);
+                  let matched = false;
+                  if (sub.type === 'keyword') matched = matchKeyword(article.title, sub.match_value);
+                  else if (sub.type === 'author') matched = matchAuthor(article.author, sub.match_value);
+
+                  if (matched) {
+                    allMatches.push({
+                      article,
+                      board,
+                      matchType: sub.type,
+                      matchValue: sub.match_value,
+                      targetId: sub.target_id,
+                      targetType: sub.target_type,
+                    });
+                    notifiedInThisCycle.add(dupKey);
+                  }
+                }
               }
             }
+
+            // Update guild board state and last check timestamp
+            if (currentNewestAid) db.setGuildBoardState(guildId, board, currentNewestAid);
+            if (guildId) db.setGuildSetting(guildId, 'ptt_last_check', String(now));
           }
         } catch (err) {
           console.error(`[scraper] Error crawling ${board}:`, err.message);
@@ -220,7 +241,7 @@ function startScraperLoop() {
 
       // Send all collected notifications
       if (allMatches.length) {
-        console.log(`[scraper] 🚀 成功匹配！正在發送 ${allMatches.length} 則通知...`);
+        console.log(`[scraper] 🚀 成功匹配！正在發送 ${allMatches.length} 則通知…`);
         await sendNotifications(client, allMatches);
       }
 
@@ -238,6 +259,116 @@ function startScraperLoop() {
     await tick();
     const interval = db.getIntervalMs('poll_interval_ms', ENV_INTERVALS.poll_interval_ms);
     console.log(`[scraper] ⏳ 下次掃描於 ${interval / 1000}s 後。`);
+    setTimeout(schedule, interval);
+  }
+
+  schedule();
+}
+
+// ─── PTT Thread (Push) Monitoring Loop ───────────────────────────────────────
+
+/**
+ * PTT thread push monitoring loop:
+ * 1. Fetch all subscribed PTT article URLs
+ * 2. Crawl pushes and current poll offset for each article
+ * 3. Compare with stored state (pollOffset, pushCount)
+ * 4. Filter new pushes against subscriber keywords
+ * 5. Send notifications and update state
+ */
+function startThreadScraperLoop() {
+  let running = false;
+
+  async function tick() {
+    if (running) {
+      console.warn('[thread] Previous cycle still running, skipping tick.');
+      return;
+    }
+
+    if (!isWithinOperatingHours('ptt')) {
+      console.log(`[thread] ⏰ 目前非設定的營業時間，跳過循環。`);
+      return;
+    }
+
+    running = true;
+
+    try {
+      const articleUrls = db.getAllThreadArticles();
+      if (!articleUrls.length) return;
+
+      console.log(`[thread] === 開始掃描 PTT 文章推文 (${articleUrls.length} 篇文章) ===`);
+      const allMatches = [];
+
+      for (const articleUrl of articleUrls) {
+        try {
+          const { pushes, pollOffset } = await crawlArticle(articleUrl);
+          const prevState = db.getThreadState(articleUrl);
+
+          if (!prevState) {
+            // First time seeing this article: save baseline, no notifications
+            console.log(`[thread] [${articleUrl}] 首次掃描，儲存基準 (Offset: ${pollOffset}, Pushes: ${pushes.length})。`);
+            db.upsertThreadState(articleUrl, pollOffset, pushes.length);
+            continue;
+          }
+
+          // Check if there are new pushes:
+          // New pushes exist if pollOffset changed OR push count increased
+          const offsetChanged = pollOffset && pollOffset !== prevState.poll_offset;
+          const countIncreased = pushes.length > prevState.push_count;
+
+          if (offsetChanged || countIncreased) {
+            // Calculate new pushes index: if count increased, slice from previous count
+            const prevCount = prevState.push_count;
+            const newPushes = pushes.slice(prevCount);
+
+            if (newPushes.length > 0) {
+              const subs = db.getThreadSubsForArticle(articleUrl);
+              console.log(`[thread] [${articleUrl}] 發現 ${newPushes.length} 則新推文，比對 ${subs.length} 筆訂閱中…`);
+
+              for (const push of newPushes) {
+                for (const sub of subs) {
+                  if (!sub.keyword || matchPushKeyword(push.content, sub.keyword)) {
+                    allMatches.push({
+                      push,
+                      articleUrl,
+                      keyword: sub.keyword,
+                      targetId: sub.target_id,
+                      targetType: sub.target_type,
+                      userId: sub.user_id,
+                    });
+                  }
+                }
+              }
+            }
+
+            // Update state
+            db.upsertThreadState(articleUrl, pollOffset, pushes.length);
+          } else {
+            console.log(`[thread] [${articleUrl}] 無新推文。`);
+          }
+        } catch (err) {
+          console.error(`[thread] Error crawling ${articleUrl}:`, err.message);
+        }
+
+        if (articleUrls.length > 1) await sleep(COOLDOWN_MS);
+      }
+
+      if (allMatches.length) {
+        console.log(`[thread] 🚀 發送 ${allMatches.length} 則新推文通知...`);
+        await sendThreadPushNotifications(client, allMatches);
+      }
+
+      console.log(`[thread] === 循環結束 (${new Date().toLocaleTimeString('zh-TW')}) ===`);
+    } catch (err) {
+      console.error('[thread] Unexpected error in tick:', err);
+    } finally {
+      running = false;
+    }
+  }
+
+  async function schedule() {
+    await tick();
+    const interval = db.getMinIntervalMsAcrossGuilds('thread_poll_interval_ms', ENV_INTERVALS.thread_poll_interval_ms);
+    console.log(`[thread] ⏳ 下次掃描於 ${interval / 1000}s 後。`);
     setTimeout(schedule, interval);
   }
 
@@ -354,7 +485,7 @@ function startShopScraperLoop() {
 
   async function schedule() {
     await tick();
-    const interval = db.getIntervalMs('shop_poll_interval_ms', ENV_INTERVALS.shop_poll_interval_ms);
+    const interval = db.getMinIntervalMsAcrossGuilds('shop_poll_interval_ms', ENV_INTERVALS.shop_poll_interval_ms);
     console.log(`[shop] ⏳ 下次掃描於 ${interval / 1000}s 後。`);
     setTimeout(schedule, interval);
   }
@@ -467,7 +598,7 @@ function startEsliteScraperLoop() {
 
   async function schedule() {
     await tick();
-    const interval = db.getIntervalMs('eslite_poll_interval_ms', ENV_INTERVALS.eslite_poll_interval_ms);
+    const interval = db.getMinIntervalMsAcrossGuilds('eslite_poll_interval_ms', ENV_INTERVALS.eslite_poll_interval_ms);
     console.log(`[eslite] ⏳ 下次掃描於 ${interval / 1000}s 後。`);
     setTimeout(schedule, interval);
   }
@@ -583,7 +714,7 @@ function startMomoScraperLoop() {
 
   async function schedule() {
     await tick();
-    const interval = db.getIntervalMs('momo_poll_interval_ms', ENV_INTERVALS.momo_poll_interval_ms);
+    const interval = db.getMinIntervalMsAcrossGuilds('momo_poll_interval_ms', ENV_INTERVALS.momo_poll_interval_ms);
     console.log(`[momo] ⏳ 下次掃描於 ${interval / 1000}s 後。`);
     setTimeout(schedule, interval);
   }
@@ -670,7 +801,7 @@ function startShopeeScraperLoop() {
 
   async function schedule() {
     await tick();
-    const interval = db.getIntervalMs('shopee_poll_interval_ms', ENV_INTERVALS.shopee_poll_interval_ms);
+    const interval = db.getMinIntervalMsAcrossGuilds('shopee_poll_interval_ms', ENV_INTERVALS.shopee_poll_interval_ms);
     console.log(`[shopee] ⏳ 下次掃描於 ${interval / 1000}s 後。`);
     setTimeout(schedule, interval);
   }

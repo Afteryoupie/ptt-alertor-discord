@@ -97,6 +97,7 @@ module.exports = {
         target_id:    targetId,
         target_type:  targetType,
         category_url: canonicalUrl,
+        guild_id:     interaction.guildId || '',
       });
 
       return interaction.reply({

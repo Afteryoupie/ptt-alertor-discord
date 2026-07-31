@@ -6,13 +6,15 @@ const { parseCategoryInput: parseShopCategoryInput } = require('../shop-scraper'
 const { parseExhibitionUrl: parseEsliteExhibitionUrl, exhibitionUrl } = require('../eslite-scraper');
 const { parseCategoryInput: parseMomoCategoryInput, categoryUrl: momoCategoryUrl } = require('../momo-scraper');
 const { parseShopeeUrl } = require('../shopee-scraper');
+const { normalizeArticleUrl, crawlArticle } = require('../thread-scraper');
 
 /**
  * Auto-detect platform from URL input.
  * @param {string} inputUrl
- * @returns {'shopee' | 'momo' | 'eslite' | 'shop' | null}
+ * @returns {'shopee' | 'momo' | 'eslite' | 'shop' | 'thread' | null}
  */
 function detectPlatform(inputUrl) {
+  if (/ptt\.cc\/bbs\/.+\/M\.\d+\.[A-Z]\.[A-F0-9]+\.html/.test(inputUrl)) return 'thread';
   try { parseShopeeUrl(inputUrl); return 'shopee'; } catch (_) {}
   try { parseMomoCategoryInput(inputUrl); return 'momo'; } catch (_) {}
   try { parseEsliteExhibitionUrl(inputUrl); return 'eslite'; } catch (_) {}
@@ -21,7 +23,7 @@ function detectPlatform(inputUrl) {
 }
 
 /** Helper function to handle adding subscription per platform */
-function handleAddByPlatform(platform, rawInput, userId, targetId, targetType) {
+function handleAddByPlatform(platform, rawInput, userId, targetId, targetType, guildId) {
   if (platform === 'shopee') {
     const parsed = parseShopeeUrl(rawInput);
     const existing = db.findShopeeSubscription({ user_id: userId, target_id: targetId, search_url: parsed.canonicalUrl });
@@ -35,6 +37,7 @@ function handleAddByPlatform(platform, rawInput, userId, targetId, targetType) {
       search_url: parsed.canonicalUrl,
       keyword: parsed.keyword,
       shop_id: parsed.shopId,
+      guild_id: guildId || '',
     });
     return {
       status: 'success',
@@ -57,6 +60,7 @@ function handleAddByPlatform(platform, rawInput, userId, targetId, targetType) {
       target_id: targetId,
       target_type: targetType,
       category_url: canonicalUrl,
+      guild_id: guildId || '',
     });
     return {
       status: 'success',
@@ -79,6 +83,7 @@ function handleAddByPlatform(platform, rawInput, userId, targetId, targetType) {
       target_id: targetId,
       target_type: targetType,
       exhibition_id: exhibitionId,
+      guild_id: guildId || '',
     });
     return {
       status: 'success',
@@ -100,6 +105,7 @@ function handleAddByPlatform(platform, rawInput, userId, targetId, targetType) {
       target_id: targetId,
       target_type: targetType,
       category_url: categoryUrl,
+      guild_id: guildId || '',
     });
     return {
       status: 'success',
@@ -107,6 +113,29 @@ function handleAddByPlatform(platform, rawInput, userId, targetId, targetType) {
       title: `分類: \`${categoryUrl}\``,
       canonicalUrl: categoryUrl,
       id: `shop-${subId}`,
+    };
+  }
+
+  if (platform === 'thread') {
+    const articleUrl = normalizeArticleUrl(rawInput);
+    const existing = db.findThreadSubscription({ user_id: userId, target_id: targetId, article_url: articleUrl, keyword: '' });
+    if (existing) {
+      return { status: 'exists', message: `⚠️ 這個 PTT 置底貼文已經在追蹤中了（ID: thread-${existing.id}）` };
+    }
+    const subId = db.addThreadSubscription({
+      user_id: userId,
+      target_id: targetId,
+      target_type: targetType,
+      article_url: articleUrl,
+      keyword: '',
+      guild_id: guildId || '',
+    });
+    return {
+      status: 'success',
+      platformName: '💬 PTT 置底貼文推文監控',
+      title: `文章: \`${articleUrl}\``,
+      canonicalUrl: articleUrl,
+      id: `thread-${subId}`,
     };
   }
 
@@ -203,7 +232,7 @@ module.exports = {
     }
 
     try {
-      const result = handleAddByPlatform(platform, rawInput, userId, targetId, targetType);
+      const result = handleAddByPlatform(platform, rawInput, userId, targetId, targetType, interaction.guildId);
 
       if (result.status === 'exists') {
         return interaction.reply({

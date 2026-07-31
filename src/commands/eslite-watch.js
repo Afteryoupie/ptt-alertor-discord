@@ -79,6 +79,7 @@ module.exports = {
         target_id:     targetId,
         target_type:   targetType,
         exhibition_id: exhibitionId,
+        guild_id:      interaction.guildId || '',
       });
 
       return interaction.reply({

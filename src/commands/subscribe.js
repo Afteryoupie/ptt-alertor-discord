@@ -66,6 +66,7 @@ module.exports = {
         board,
         type,
         match_value: matchValue,
+        guild_id:    interaction.guildId || '',
       });
 
       // Get the current list to find the sequential index of the new subscription

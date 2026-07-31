@@ -214,10 +214,42 @@ function sendShopeeRestockNotifications(client, matches) {
   );
 }
 
+/**
+ * Build a Discord embed for a PTT thread new push.
+ * @param {{ push, articleUrl, keyword }} match
+ */
+function buildThreadPushEmbed(match) {
+  const { push, articleUrl, keyword } = match;
+  const kwText = keyword ? ` (過濾: \`${keyword}\`)` : '';
+  const tagSymbol = push.tag || '推';
+
+  return new EmbedBuilder()
+    .setColor(0xff9f43) // Warm amber
+    .setTitle(`💬 PTT 置底新推文${kwText}`)
+    .setURL(articleUrl)
+    .setDescription(`**${tagSymbol} ${push.userid}**: ${push.content}`)
+    .addFields(
+      { name: '推文者', value: `\`${push.userid}\``, inline: true },
+      { name: '時間', value: push.ipdatetime || '剛剛', inline: true }
+    )
+    .setFooter({ text: 'PTT 置底推文監控' })
+    .setTimestamp();
+}
+
+/** Send PTT thread push notifications. */
+function sendThreadPushNotifications(client, matches) {
+  return sendMatchNotifications(
+    client, matches,
+    m => buildThreadPushEmbed(m),
+    '[thread]'
+  );
+}
+
 module.exports = {
   sendNotifications,
   sendRestockNotifications,
   sendEsliteRestockNotifications,
   sendMomoRestockNotifications,
   sendShopeeRestockNotifications,
+  sendThreadPushNotifications,
 };

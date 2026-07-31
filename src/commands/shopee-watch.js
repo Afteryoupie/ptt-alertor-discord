@@ -82,6 +82,7 @@ module.exports = {
           search_url: parsed.canonicalUrl,
           keyword: parsed.keyword,
           shop_id: parsed.shopId,
+          guild_id: interaction.guildId || '',
         });
 
         // Initialize snapshot
