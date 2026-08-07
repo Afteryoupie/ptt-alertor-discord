@@ -209,7 +209,40 @@ function deserializeSnapshot(obj) {
   return snapshot;
 }
 
+/**
+ * Normalize and validate Funbox category URL or path.
+ * @param {string} input
+ * @returns {string} canonical category URL
+ */
+function parseCategoryInput(input) {
+  const trimmed = input.trim().replace(/\/$/, '');
+
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    try {
+      const u = new URL(trimmed);
+      if (!u.hostname.includes('funbox.com.tw')) {
+        throw new Error('Not funbox domain');
+      }
+      const match = u.pathname.match(/\/categories\/(.+)/);
+      if (match) {
+        return `https://shop.funbox.com.tw/categories/${match[1]}`;
+      }
+    } catch (_) {
+      throw new Error(`無效的 Funbox 商店分類網址: ${trimmed}`);
+    }
+  }
+
+  const pathMatch = trimmed.match(/(?:categories\/)?(.+)/);
+  const path = pathMatch ? pathMatch[1].replace(/^\/+/, '') : trimmed;
+  if (!path || path.startsWith('http')) {
+    throw new Error(`無效的 Funbox 商店分類格式: ${trimmed}`);
+  }
+  return `https://shop.funbox.com.tw/categories/${path}`;
+}
+
 module.exports = {
+  parseCategoryInput,
+  normalizeCategoryUrl: parseCategoryInput,
   snapshotCategory,
   detectRestocks,
   serializeSnapshot,

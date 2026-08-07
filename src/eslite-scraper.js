@@ -25,10 +25,18 @@ const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4) AppleWebKit/605
 function parseExhibitionId(input) {
   const trimmed = input.trim();
   // Try to extract from URL
-  const match = trimmed.match(/exhibitions\/([^?#/]+)/);
+  const match = trimmed.match(/eslite\.com\/exhibitions\/([^?#/]+)/i) || trimmed.match(/exhibitions\/([^?#/]+)/i);
   if (match) return match[1];
-  // Bare ID
-  return trimmed;
+
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    throw new Error(`無效的誠品展覽網址格式: ${trimmed}`);
+  }
+
+  if (/^[A-Za-z0-9_-]+$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  throw new Error(`無效的誠品展覽代碼格式: ${trimmed}`);
 }
 
 /**
@@ -206,6 +214,7 @@ function deserializeSnapshot(obj) {
 
 module.exports = {
   parseExhibitionId,
+  parseExhibitionUrl: parseExhibitionId,
   exhibitionUrl,
   snapshotExhibition,
   detectRestocks,
