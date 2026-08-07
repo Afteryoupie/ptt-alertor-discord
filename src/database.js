@@ -199,8 +199,21 @@ for (const table of subTables) {
 // Safe migration: migrate eslite_subscriptions to new schema without exhibition_id NOT NULL constraint
 try {
   const subCols = db.pragma('table_info(eslite_subscriptions)');
-  const hasExhibitionId = subCols.some(c => c.name === 'exhibition_id');
-  if (hasExhibitionId) {
+  const colNames = subCols.map(c => c.name);
+  const hasExhibitionId = colNames.includes('exhibition_id');
+  const hasKeyword = colNames.includes('keyword');
+
+  if (hasExhibitionId || !hasKeyword) {
+    const keywordExpr = (hasKeyword && hasExhibitionId)
+      ? "COALESCE(NULLIF(keyword, ''), exhibition_id, '')"
+      : hasKeyword
+      ? "COALESCE(keyword, '')"
+      : hasExhibitionId
+      ? "COALESCE(exhibition_id, '')"
+      : "''";
+    const searchUrlExpr = colNames.includes('search_url') ? 'search_url' : 'NULL';
+    const guildIdExpr = colNames.includes('guild_id') ? "COALESCE(guild_id, '')" : "''";
+
     db.exec(`
       CREATE TABLE IF NOT EXISTS eslite_subscriptions_new (
         id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -213,7 +226,7 @@ try {
         created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
       );
       INSERT OR IGNORE INTO eslite_subscriptions_new (id, user_id, target_id, target_type, keyword, search_url, guild_id, created_at)
-      SELECT id, user_id, target_id, target_type, COALESCE(NULLIF(keyword, ''), exhibition_id), search_url, COALESCE(guild_id, ''), created_at
+      SELECT id, user_id, target_id, target_type, ${keywordExpr}, ${searchUrlExpr}, ${guildIdExpr}, created_at
       FROM eslite_subscriptions;
       DROP TABLE eslite_subscriptions;
       ALTER TABLE eslite_subscriptions_new RENAME TO eslite_subscriptions;
@@ -226,8 +239,11 @@ try {
 // Safe migration: migrate eslite_snapshots to keyword primary key if needed
 try {
   const snapCols = db.pragma('table_info(eslite_snapshots)');
-  const hasSnapKeyword = snapCols.some(c => c.name === 'keyword');
+  const snapColNames = snapCols.map(c => c.name);
+  const hasSnapKeyword = snapColNames.includes('keyword');
+  const hasSnapExhibition = snapColNames.includes('exhibition_id');
   if (snapCols.length > 0 && !hasSnapKeyword) {
+    const keyExpr = hasSnapExhibition ? 'exhibition_id' : snapColNames[0];
     db.exec(`
       CREATE TABLE IF NOT EXISTS eslite_snapshots_new (
         keyword       TEXT PRIMARY KEY,
@@ -235,7 +251,7 @@ try {
         updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
       );
       INSERT OR IGNORE INTO eslite_snapshots_new (keyword, snapshot_json, updated_at)
-      SELECT exhibition_id, snapshot_json, updated_at FROM eslite_snapshots;
+      SELECT ${keyExpr}, snapshot_json, updated_at FROM eslite_snapshots;
       DROP TABLE eslite_snapshots;
       ALTER TABLE eslite_snapshots_new RENAME TO eslite_snapshots;
     `);
