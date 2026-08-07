@@ -109,12 +109,22 @@ client.on('interactionCreate', async interaction => {
     try {
       await cmd.execute(interaction);
     } catch (err) {
+      if (err.code === 10062 || err.code === 40060) {
+        console.warn(`[commands] ⚠️ Interaction expired or already acknowledged for /${interaction.commandName} (Code ${err.code})`);
+        return;
+      }
       console.error(`[commands] Error in /${interaction.commandName}:`, err);
       const msg = { content: '❌ 指令執行發生錯誤，請稍後再試。', flags: [MessageFlags.Ephemeral] };
-      if (interaction.replied || interaction.deferred) {
-        await interaction.followUp(msg).catch(() => { });
-      } else {
-        await interaction.reply(msg).catch(() => { });
+      try {
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp(msg);
+        } else {
+          await interaction.reply(msg);
+        }
+      } catch (replyErr) {
+        if (replyErr.code !== 10062 && replyErr.code !== 40060) {
+          console.error(`[commands] Failed to send error message for /${interaction.commandName}:`, replyErr.message);
+        }
       }
     }
   } else if (interaction.isAutocomplete()) {
@@ -124,10 +134,15 @@ client.on('interactionCreate', async interaction => {
     try {
       await cmd.autocomplete(interaction);
     } catch (err) {
+      if (err.code === 10062 || err.code === 40060) {
+        // Expected Discord behavior: interaction was superseded by newer keystroke or cancelled
+        return;
+      }
       console.error(`[autocomplete] Error in /${interaction.commandName}:`, err);
     }
   }
 });
+
 
 // ─── Scraper Loop ─────────────────────────────────────────────────────────────
 

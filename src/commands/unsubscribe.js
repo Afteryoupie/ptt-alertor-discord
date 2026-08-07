@@ -156,8 +156,10 @@ module.exports = {
       await interaction.respond(
         filtered.map(c => ({ name: c.name, value: c.value }))
       );
-    } catch (_) {
-      await interaction.respond([]);
+    } catch (err) {
+      if (err.code !== 10062 && err.code !== 40060) {
+        await interaction.respond([]).catch(() => {});
+      }
     }
   },
 };

@@ -153,15 +153,21 @@ module.exports = {
   },
 
   async autocomplete(interaction) {
-    const focusedValue = interaction.options.getFocused().toLowerCase();
-    const choices = ['MacShop', 'DC_SALE', 'steam', 'Gossiping', 'Lifeismoney', 'Life', 'Gamesale', 'HardwareSale'];
-    
-    const filtered = choices
-      .filter(choice => choice.toLowerCase().includes(focusedValue))
-      .slice(0, 25); // Discord limit is 25
+    try {
+      const focusedValue = interaction.options.getFocused().toLowerCase();
+      const choices = ['MacShop', 'DC_SALE', 'steam', 'Gossiping', 'Lifeismoney', 'Life', 'Gamesale', 'HardwareSale'];
+      
+      const filtered = choices
+        .filter(choice => choice.toLowerCase().includes(focusedValue))
+        .slice(0, 25); // Discord limit is 25
 
-    await interaction.respond(
-      filtered.map(choice => ({ name: choice, value: choice }))
-    );
+      await interaction.respond(
+        filtered.map(choice => ({ name: choice, value: choice }))
+      );
+    } catch (err) {
+      if (err.code !== 10062 && err.code !== 40060) {
+        console.error('[subscribe-autocomplete] Error:', err);
+      }
+    }
   },
 };
