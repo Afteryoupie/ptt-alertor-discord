@@ -92,23 +92,16 @@ module.exports = {
         return;
       }
 
-      const deleted = db.removeSubscriptionByPlatform({
+      db.removeSubscriptionByPlatform({
         platform: targetSub.platform,
         id: targetSub.id,
         user_id: userId,
       });
 
-      if (deleted === 0) {
-        await interaction.reply({
-          content: `❌ 刪除失敗，該項目可能已被刪除或不属于您。`,
-          flags: [MessageFlags.Ephemeral],
-        });
-      } else {
-        await interaction.reply({
-          content: `✅ 已成功刪除追蹤項目：\n${formatSubDescription(targetSub)}`,
-          flags: [MessageFlags.Ephemeral],
-        });
-      }
+      await interaction.reply({
+        content: `✅ 已成功刪除追蹤項目：\n${formatSubDescription(targetSub)}`,
+        flags: [MessageFlags.Ephemeral],
+      });
     } catch (err) {
       console.error('[unsubscribe] Error:', err);
       await interaction.reply({ content: '❌ 刪除失敗，請稍後再試。', flags: [MessageFlags.Ephemeral] });
