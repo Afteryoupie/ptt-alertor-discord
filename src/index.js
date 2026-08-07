@@ -198,12 +198,13 @@ function startScraperLoop() {
               const subs = db.getSubsForBoardAndGuild(board, guildId);
               console.log(`[scraper] [${board}] [guild:${guildId || 'global'}] 發現 ${guildNewArticles.length} 篇新文章，比對 ${subs.length} 筆訂閱中…`);
 
-              // Deduplicate within this guild's cycle
+              // 以 target_id + article.aid 去重：
+              // 確保同一個頻道對同一篇文章只發一則通知，
+              // 不論有幾條 keyword 訂閱同時符合
               const notifiedInThisCycle = new Set();
               for (const article of guildNewArticles) {
                 for (const sub of subs) {
-                  // 用 sub.id 區分不同訂閱規則，避免同一 target 的多個 keyword 互相抑制
-                  const dupKey = `${sub.id}-${article.aid}`;
+                  const dupKey = `${sub.target_id}-${article.aid}`;
                   if (notifiedInThisCycle.has(dupKey)) continue;
 
                   let matched = false;
