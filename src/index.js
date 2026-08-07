@@ -180,6 +180,10 @@ function startScraperLoop() {
       console.log(`[scraper] === 開始掃描循環 (${boards.length} 個看板) ===`);
       const allMatches = [];
       const now = Date.now();
+      // Tick-level dedup Set: shared across ALL guilds and boards in this tick.
+      // Prevents the same (target_id, article.aid) from being added to allMatches
+      // more than once even if multiple guild iterations encounter the same article.
+      const tickDupKeys = new Set();
 
       for (const board of boards) {
         try {
@@ -215,14 +219,19 @@ function startScraperLoop() {
               const subs = db.getSubsForBoardAndGuild(board, guildId);
               console.log(`[scraper] [${board}] [guild:${guildId || 'global'}] 發現 ${guildNewArticles.length} 篇新文章，比對 ${subs.length} 筆訂閱中…`);
 
-              // 以 target_id + article.aid 去重：
-              // 確保同一個頻道對同一篇文章只發一則通知，
-              // 不論有幾條 keyword 訂閱同時符合
-              const notifiedInThisCycle = new Set();
               for (const article of guildNewArticles) {
                 for (const sub of subs) {
                   const dupKey = `${sub.target_id}-${article.aid}`;
-                  if (notifiedInThisCycle.has(dupKey)) continue;
+
+                  // Layer 1: same-tick dedup (covers multiple guilds seeing same article)
+                  if (tickDupKeys.has(dupKey)) continue;
+
+                  // Layer 2: DB dedup (covers cross-restart / previous ticks)
+                  if (db.hasPttNotificationBeenSent(sub.target_id, article.aid)) {
+                    console.log(`[scraper] ⏭️ 跳過已通知: ${sub.target_id} ← ${article.aid}`);
+                    tickDupKeys.add(dupKey); // also add so Layer 1 short-circuits remaining subs
+                    continue;
+                  }
 
                   let matched = false;
                   if (sub.type === 'keyword') matched = matchKeyword(article.title, sub.match_value);
@@ -237,7 +246,7 @@ function startScraperLoop() {
                       targetId: sub.target_id,
                       targetType: sub.target_type,
                     });
-                    notifiedInThisCycle.add(dupKey);
+                    tickDupKeys.add(dupKey);
                   }
                 }
               }
@@ -260,21 +269,12 @@ function startScraperLoop() {
         }
       }
 
-      // Cross-tick dedup: filter out articles already notified (DB-persistent, survives restarts)
-      const dedupedMatches = allMatches.filter(m => {
-        if (db.hasPttNotificationBeenSent(m.targetId, m.article.aid)) {
-          console.log(`[scraper] ⏭️ 跳過已通知: ${m.targetId} ← ${m.article.aid}`);
-          return false;
-        }
-        return true;
-      });
-
-      // Send all collected notifications
-      if (dedupedMatches.length) {
-        console.log(`[scraper] 🚀 成功匹配！正在發送 ${dedupedMatches.length} 則通知…`);
-        await sendNotifications(client, dedupedMatches);
+      // Send all collected notifications (already fully deduped at collection time)
+      if (allMatches.length) {
+        console.log(`[scraper] 🚀 成功匹配！正在發送 ${allMatches.length} 則通知…`);
+        await sendNotifications(client, allMatches);
         // Persist sent records to DB so restarts won't re-send
-        for (const m of dedupedMatches) {
+        for (const m of allMatches) {
           db.recordPttSentNotification(m.targetId, m.article.aid);
         }
       }
