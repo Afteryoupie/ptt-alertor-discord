@@ -113,8 +113,11 @@ module.exports = {
 
         // Always update board state with the newest AID seen during instant verification
         // so that the background scraper loop won't notify old/verified articles again.
+        // 同時更新 guild_board_state（避免背景 scraper 按 guild 維度再次通知）
+        // 以及全域 board_state（確保舊路徑也正確）
         if (currentNewestAid) {
-          db.upsertBoardState(board, currentNewestAid);
+          const guildId = interaction.guildId || '';
+          db.setGuildBoardState(guildId, board, currentNewestAid);
         }
 
       } catch (crawlErr) {
