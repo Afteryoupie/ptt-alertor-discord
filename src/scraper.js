@@ -124,11 +124,12 @@ function filterNewArticles(articles, lastAid) {
 
 /**
  * Get the newest article ID from a list.
+ * Uses reduce to find the lexicographically largest AID,
+ * because PTT pages may not be in strict order after deletions.
  */
 function getNewestAid(articles) {
   if (!articles.length) return null;
-  // Articles are oldest→newest after reverse; last element is newest
-  return articles[articles.length - 1].aid;
+  return articles.reduce((max, a) => (a.aid > max ? a.aid : max), articles[0].aid);
 }
 
 // ─── Keyword Matching ────────────────────────────────────────────────────────

@@ -226,7 +226,10 @@ function startScraperLoop() {
             }
 
             // Update guild board state and last check timestamp
-            if (currentNewestAid) db.setGuildBoardState(guildId, board, currentNewestAid);
+            // 只往前更新，防止刪文後 currentNewestAid 回退導致重複通知
+            if (currentNewestAid && (!guildLastAid || currentNewestAid > guildLastAid)) {
+              db.setGuildBoardState(guildId, board, currentNewestAid);
+            }
             db.setSetting(lastCheckKey, String(now));
           }
         } catch (err) {
