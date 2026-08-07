@@ -232,12 +232,17 @@ function parseCategoryInput(input) {
     }
   }
 
-  const pathMatch = trimmed.match(/(?:categories\/)?(.+)/);
-  const path = pathMatch ? pathMatch[1].replace(/^\/+/, '') : trimmed;
-  if (!path || path.startsWith('http')) {
-    throw new Error(`無效的 Funbox 商店分類格式: ${trimmed}`);
+  // Support "categories/XI/KB" or short path "XI/KB"
+  if (trimmed.startsWith('categories/')) {
+    const path = trimmed.replace(/^categories\//, '').replace(/^\/+/, '');
+    if (path) return `https://shop.funbox.com.tw/categories/${path}`;
   }
-  return `https://shop.funbox.com.tw/categories/${path}`;
+
+  if (/^[A-Za-z0-9_-]+(\/[A-Za-z0-9_-]+)+$/.test(trimmed)) {
+    return `https://shop.funbox.com.tw/categories/${trimmed}`;
+  }
+
+  throw new Error(`無效的 Funbox 商店分類格式: ${trimmed}`);
 }
 
 module.exports = {

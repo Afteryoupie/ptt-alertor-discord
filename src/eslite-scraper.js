@@ -32,7 +32,8 @@ function parseExhibitionId(input) {
     throw new Error(`無效的誠品展覽網址格式: ${trimmed}`);
   }
 
-  if (/^[A-Za-z0-9_-]+$/.test(trimmed)) {
+  // Eslite exhibition IDs are structured like "CU202503-00091"
+  if (/^[A-Z]{2}\d{6}-\d+$/i.test(trimmed) || /^CU[A-Z0-9_-]+$/i.test(trimmed)) {
     return trimmed;
   }
 
