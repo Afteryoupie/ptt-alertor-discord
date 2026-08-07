@@ -55,16 +55,16 @@ module.exports = {
 
         if (r.platform === 'ptt') {
           const icon = r.type === 'keyword' ? '🔑' : '👤';
-          sections.ptt.items.push(`\`${num}\`. ${icon} **[${r.board}]** ${r.match_value} (${dest})`);
+          sections.ptt.items.push(`\`${num}\`. ${icon} **[${r.board}]** ${r.match_value} (${dest}) \`[ptt-${r.id}]\``);
         } else if (r.platform === 'shop') {
-          sections.shop.items.push(`\`${num}\`. 🛍️ **[Funbox]** ${shopLabel(r.category_url)} (${dest})`);
+          sections.shop.items.push(`\`${num}\`. 🛍️ **[Funbox]** ${shopLabel(r.category_url)} (${dest}) \`[shop-${r.id}]\``);
         } else if (r.platform === 'momo') {
-          sections.momo.items.push(`\`${num}\`. 🍑 **[momo]** ${momoLabel(r.category_url)} (${dest})`);
+          sections.momo.items.push(`\`${num}\`. 🍑 **[momo]** ${momoLabel(r.category_url)} (${dest}) \`[momo-${r.id}]\``);
         } else if (r.platform === 'eslite') {
-          sections.eslite.items.push(`\`${num}\`. 📚 **[誠品]** ${r.exhibition_id} (${dest})`);
+          sections.eslite.items.push(`\`${num}\`. 📚 **[誠品]** ${r.exhibition_id} (${dest}) \`[eslite-${r.id}]\``);
         } else if (r.platform === 'shopee') {
           const label = r.keyword ? `🔑 ${r.keyword} (shop:${r.shop_id || '全站'})` : `🏬 shop:${r.shop_id}`;
-          sections.shopee.items.push(`\`${num}\`. 🟠 **[蝦皮]** ${label} (${dest})`);
+          sections.shopee.items.push(`\`${num}\`. 🟠 **[蝦皮]** ${label} (${dest}) \`[shopee-${r.id}]\``);
         }
       });
 
