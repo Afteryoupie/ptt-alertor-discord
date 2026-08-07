@@ -67,22 +67,22 @@ db.exec(`
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
-  -- Eslite exhibition restock tracking
+  -- Eslite keyword search restock tracking
   CREATE TABLE IF NOT EXISTS eslite_subscriptions (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id        TEXT NOT NULL,
     target_id      TEXT NOT NULL,
     target_type    TEXT NOT NULL CHECK(target_type IN ('channel', 'dm')),
-    exhibition_id  TEXT NOT NULL,
+    keyword        TEXT NOT NULL,
+    search_url     TEXT,
     guild_id       TEXT NOT NULL DEFAULT '',
     created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
-  CREATE INDEX IF NOT EXISTS idx_eslite_subs_exhibition ON eslite_subscriptions(exhibition_id);
-  CREATE INDEX IF NOT EXISTS idx_eslite_subs_user       ON eslite_subscriptions(user_id);
+  CREATE INDEX IF NOT EXISTS idx_eslite_subs_user    ON eslite_subscriptions(user_id);
 
   CREATE TABLE IF NOT EXISTS eslite_snapshots (
-    exhibition_id TEXT PRIMARY KEY,
+    keyword       TEXT PRIMARY KEY,
     snapshot_json TEXT NOT NULL,
     updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -196,6 +196,54 @@ for (const table of subTables) {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN guild_id TEXT NOT NULL DEFAULT ''`); } catch (_) {}
 }
 
+// Safe migration: migrate eslite_subscriptions to new schema without exhibition_id NOT NULL constraint
+try {
+  const subCols = db.pragma('table_info(eslite_subscriptions)');
+  const hasExhibitionId = subCols.some(c => c.name === 'exhibition_id');
+  if (hasExhibitionId) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS eslite_subscriptions_new (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id        TEXT NOT NULL,
+        target_id      TEXT NOT NULL,
+        target_type    TEXT NOT NULL CHECK(target_type IN ('channel', 'dm')),
+        keyword        TEXT NOT NULL,
+        search_url     TEXT,
+        guild_id       TEXT NOT NULL DEFAULT '',
+        created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT OR IGNORE INTO eslite_subscriptions_new (id, user_id, target_id, target_type, keyword, search_url, guild_id, created_at)
+      SELECT id, user_id, target_id, target_type, COALESCE(NULLIF(keyword, ''), exhibition_id), search_url, COALESCE(guild_id, ''), created_at
+      FROM eslite_subscriptions;
+      DROP TABLE eslite_subscriptions;
+      ALTER TABLE eslite_subscriptions_new RENAME TO eslite_subscriptions;
+    `);
+  }
+} catch (err) {
+  console.error('[db] Error migrating eslite_subscriptions:', err.message);
+}
+
+// Safe migration: migrate eslite_snapshots to keyword primary key if needed
+try {
+  const snapCols = db.pragma('table_info(eslite_snapshots)');
+  const hasSnapKeyword = snapCols.some(c => c.name === 'keyword');
+  if (snapCols.length > 0 && !hasSnapKeyword) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS eslite_snapshots_new (
+        keyword       TEXT PRIMARY KEY,
+        snapshot_json TEXT NOT NULL,
+        updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT OR IGNORE INTO eslite_snapshots_new (keyword, snapshot_json, updated_at)
+      SELECT exhibition_id, snapshot_json, updated_at FROM eslite_snapshots;
+      DROP TABLE eslite_snapshots;
+      ALTER TABLE eslite_snapshots_new RENAME TO eslite_snapshots;
+    `);
+  }
+} catch (err) {
+  console.error('[db] Error migrating eslite_snapshots:', err.message);
+}
+
 // Clean up any pre-existing duplicate subscriptions across all platform tables
 try {
   db.exec(`
@@ -214,7 +262,7 @@ try {
     DELETE FROM eslite_subscriptions
     WHERE id NOT IN (
       SELECT MIN(id) FROM eslite_subscriptions
-      GROUP BY user_id, target_id, exhibition_id
+      GROUP BY user_id, target_id, LOWER(keyword)
     );
 
     DELETE FROM momo_subscriptions
@@ -243,7 +291,7 @@ try {
     ON shop_subscriptions(user_id, target_id, category_url);
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_eslite_subs_unique 
-    ON eslite_subscriptions(user_id, target_id, exhibition_id);
+    ON eslite_subscriptions(user_id, target_id, keyword COLLATE NOCASE);
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_momo_subs_unique 
     ON momo_subscriptions(user_id, target_id, category_url);
@@ -443,8 +491,8 @@ const stmts = {
   // ── Eslite restock ──────────────────────────────────────────────────────
 
   addEsliteSubscription: db.prepare(`
-    INSERT INTO eslite_subscriptions (user_id, target_id, target_type, exhibition_id)
-    VALUES (@user_id, @target_id, @target_type, @exhibition_id)
+    INSERT INTO eslite_subscriptions (user_id, target_id, target_type, keyword, search_url, guild_id)
+    VALUES (@user_id, @target_id, @target_type, @keyword, @search_url, @guild_id)
   `),
 
   removeEsliteSubscription: db.prepare(`
@@ -452,35 +500,35 @@ const stmts = {
   `),
 
   listEsliteByUser: db.prepare(`
-    SELECT id, exhibition_id, target_type
+    SELECT id, keyword, search_url, target_type
     FROM eslite_subscriptions
     WHERE user_id = @user_id AND target_id = @target_id
     ORDER BY id ASC
   `),
 
-  getAllEsliteExhibitions: db.prepare(`
-    SELECT DISTINCT exhibition_id FROM eslite_subscriptions
+  getAllEsliteKeywords: db.prepare(`
+    SELECT DISTINCT keyword FROM eslite_subscriptions WHERE keyword != ''
   `),
 
-  getEsliteSubsForExhibition: db.prepare(`
-    SELECT id, user_id, target_id, target_type
+  getEsliteSubsForKeyword: db.prepare(`
+    SELECT id, user_id, target_id, target_type, search_url
     FROM eslite_subscriptions
-    WHERE exhibition_id = @exhibition_id
+    WHERE keyword = @keyword
   `),
 
   findEsliteSubscription: db.prepare(`
     SELECT id FROM eslite_subscriptions
-    WHERE user_id = @user_id AND target_id = @target_id AND exhibition_id = @exhibition_id
+    WHERE user_id = @user_id AND target_id = @target_id AND LOWER(keyword) = LOWER(@keyword)
   `),
 
   getEsliteSnapshot: db.prepare(`
-    SELECT snapshot_json FROM eslite_snapshots WHERE exhibition_id = @exhibition_id
+    SELECT snapshot_json FROM eslite_snapshots WHERE keyword = @keyword
   `),
 
   upsertEsliteSnapshot: db.prepare(`
-    INSERT INTO eslite_snapshots (exhibition_id, snapshot_json, updated_at)
-    VALUES (@exhibition_id, @snapshot_json, CURRENT_TIMESTAMP)
-    ON CONFLICT(exhibition_id) DO UPDATE SET
+    INSERT INTO eslite_snapshots (keyword, snapshot_json, updated_at)
+    VALUES (@keyword, @snapshot_json, CURRENT_TIMESTAMP)
+    ON CONFLICT(keyword) DO UPDATE SET
       snapshot_json = excluded.snapshot_json,
       updated_at    = CURRENT_TIMESTAMP
   `),
@@ -859,9 +907,16 @@ function getSubsForBoardAndGuild(board, guildId) {
 
 // ─── Eslite Restock API ─────────────────────────────────────────────────────
 
-/** Add an eslite exhibition restock subscription. */
+/** Add an eslite search restock subscription. */
 function addEsliteSubscription(params) {
-  const result = stmts.addEsliteSubscription.run(params);
+  const result = stmts.addEsliteSubscription.run({
+    user_id: params.user_id,
+    target_id: params.target_id,
+    target_type: params.target_type,
+    keyword: params.keyword || params.exhibition_id,
+    search_url: params.search_url || null,
+    guild_id: params.guild_id || '',
+  });
   return result.lastInsertRowid;
 }
 
@@ -876,33 +931,48 @@ function listEsliteSubscriptions({ user_id, target_id }) {
   return stmts.listEsliteByUser.all({ user_id, target_id });
 }
 
-/** Get all distinct exhibition IDs that have at least one subscription. */
-function getAllEsliteExhibitions() {
-  const rows = stmts.getAllEsliteExhibitions.all();
-  return rows.map(r => r.exhibition_id);
+/** Get all distinct keywords that have at least one subscription. */
+function getAllEsliteKeywords() {
+  const rows = stmts.getAllEsliteKeywords.all();
+  return rows.map(r => r.keyword);
 }
 
-/** Get all eslite subscriptions for a specific exhibition ID. */
-function getEsliteSubsForExhibition(exhibition_id) {
-  return stmts.getEsliteSubsForExhibition.all({ exhibition_id });
+/** Backward compatibility alias. */
+function getAllEsliteExhibitions() {
+  return getAllEsliteKeywords();
+}
+
+/** Get all eslite subscriptions for a specific keyword. */
+function getEsliteSubsForKeyword(keyword) {
+  return stmts.getEsliteSubsForKeyword.all({ keyword });
+}
+
+/** Backward compatibility alias. */
+function getEsliteSubsForExhibition(exhibitionId) {
+  return getEsliteSubsForKeyword(exhibitionId);
 }
 
 /** Check if an eslite subscription already exists. */
 function findEsliteSubscription(params) {
-  return stmts.findEsliteSubscription.get(params);
+  const keyword = params.keyword || params.exhibition_id;
+  return stmts.findEsliteSubscription.get({
+    user_id: params.user_id,
+    target_id: params.target_id,
+    keyword,
+  });
 }
 
-/** Get the persisted inventory snapshot for an exhibition (parsed JSON or null). */
-function getEsliteSnapshot(exhibition_id) {
-  const row = stmts.getEsliteSnapshot.get({ exhibition_id });
+/** Get the persisted inventory snapshot for a keyword (parsed JSON or null). */
+function getEsliteSnapshot(keyword) {
+  const row = stmts.getEsliteSnapshot.get({ keyword });
   if (!row) return null;
   try { return JSON.parse(row.snapshot_json); } catch { return null; }
 }
 
-/** Save/update the inventory snapshot for an exhibition. */
-function upsertEsliteSnapshot(exhibition_id, snapshotObj) {
+/** Save/update the inventory snapshot for a keyword. */
+function upsertEsliteSnapshot(keyword, snapshotObj) {
   stmts.upsertEsliteSnapshot.run({
-    exhibition_id,
+    keyword,
     snapshot_json: JSON.stringify(snapshotObj),
   });
 }
@@ -1177,7 +1247,9 @@ module.exports = {
   addEsliteSubscription,
   removeEsliteSubscription,
   listEsliteSubscriptions,
+  getAllEsliteKeywords,
   getAllEsliteExhibitions,
+  getEsliteSubsForKeyword,
   getEsliteSubsForExhibition,
   findEsliteSubscription,
   getEsliteSnapshot,

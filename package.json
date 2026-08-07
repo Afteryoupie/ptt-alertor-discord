@@ -8,7 +8,12 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "deploy-commands": "node src/deploy-commands.js"
   },
-  "keywords": ["ptt", "discord", "bot", "alertor"],
+  "keywords": [
+    "ptt",
+    "discord",
+    "bot",
+    "alertor"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",

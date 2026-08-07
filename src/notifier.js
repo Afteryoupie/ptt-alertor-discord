@@ -40,25 +40,38 @@ function buildRestockEmbed(restock, categoryUrl) {
 }
 
 /**
- * Build a Discord embed for an Eslite exhibition restock event.
- * @param {{ guid, name, url, prevStock, currStock, status, isNewProduct }} restock
- * @param {string} exhibitionId
+ * Build a Discord embed for an Eslite search restock / new-arrival event.
+ * @param {{ id, guid, name, price, photo, url, prevStatus, currStatus, isNewProduct, eventType }} event
+ * @param {string} keyword
  */
-function buildEsliteRestockEmbed(restock, exhibitionId) {
-  const stockLabel = restock.currStock === -1 ? '補貨中（可訂購）' : `${restock.currStock} 件`;
-  const label = restock.isNewProduct ? '🆕 新商品上架' : '🔔 補貨通知';
-  const exhibitionLink = `https://www.eslite.com/exhibitions/${exhibitionId}`;
+function buildEsliteRestockEmbed(event, keyword) {
+  const EVENT_LABELS = {
+    restock:     '🔔 誠品 補貨通知',
+    on_sale:     '🚀 誠品 正式開賣！',
+    coming_soon: '⏳ 誠品 即將開賣預告',
+    new_product: '🆕 誠品 新商品上架',
+  };
 
-  return new EmbedBuilder()
-    .setColor(restock.isNewProduct ? 0xf5a623 : 0x2ecc71)
-    .setTitle(`${label}｜${restock.name}`)
-    .setURL(restock.url)
+  const label = EVENT_LABELS[event.eventType] || (event.isNewProduct ? '🆕 誠品 新商品上架' : '🔔 誠品 補貨通知');
+  const searchLink = `https://www.eslite.com/Search?keyword=${encodeURIComponent(keyword)}`;
+
+  const embed = new EmbedBuilder()
+    .setColor(event.eventType === 'coming_soon' ? 0x9b59b6 : (event.isNewProduct ? 0xf5a623 : 0x2ecc71))
+    .setTitle(`${label}｜${event.name}`)
+    .setURL(event.url)
     .addFields(
-      { name: '目前庫存', value: stockLabel, inline: true },
-      { name: '直接購買', value: `[點此前往商品頁](${restock.url})`, inline: true },
+      { name: '💰 售價', value: event.price ? `NT$ ${event.price.toLocaleString('en-US')}` : '依頁面標示', inline: true },
+      { name: '🛒 狀態', value: event.eventType === 'coming_soon' ? '即將開賣 / 預購中' : '有現貨（可立即購買）', inline: true },
+      { name: '🔍 關鍵字搜尋', value: `[查看誠品搜尋結果](${searchLink})`, inline: true },
     )
-    .setFooter({ text: `誠品線上 • ${exhibitionId}` })
+    .setFooter({ text: `誠品線上 • 關鍵字「${keyword}」` })
     .setTimestamp();
+
+  if (event.photo) {
+    embed.setThumbnail(event.photo);
+  }
+
+  return embed;
 }
 
 /**
@@ -177,12 +190,12 @@ function sendRestockNotifications(client, matches) {
   );
 }
 
-/** Send Eslite exhibition restock notifications. */
+/** Send Eslite search restock notifications. */
 function sendEsliteRestockNotifications(client, matches) {
   return sendMatchNotifications(
     client, matches,
-    m => buildEsliteRestockEmbed(m.restock, m.exhibitionId),
-    '[notifier]'
+    m => buildEsliteRestockEmbed(m.event || m.restock, m.keyword || m.exhibitionId),
+    '[eslite]'
   );
 }
 
@@ -252,4 +265,5 @@ module.exports = {
   sendMomoRestockNotifications,
   sendShopeeRestockNotifications,
   sendThreadPushNotifications,
+  buildEsliteRestockEmbed,
 };

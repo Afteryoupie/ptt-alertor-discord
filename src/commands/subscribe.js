@@ -137,7 +137,12 @@ module.exports = {
 
     } catch (err) {
       console.error('[subscribe] Error:', err);
-      await interaction.reply({ content: '❌ 訂閱失敗，請稍後再試。', flags: [MessageFlags.Ephemeral] });
+      const msg = { content: '❌ 訂閱失敗，請稍後再試。', flags: [MessageFlags.Ephemeral] };
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp(msg).catch(() => {});
+      } else {
+        await interaction.reply(msg).catch(() => {});
+      }
     }
   },
 

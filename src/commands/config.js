@@ -33,7 +33,7 @@ const INTERVAL_CONFIGS = {
   },
   eslite: {
     key:       'eslite_poll_interval_ms',
-    label:     '誠品展覽',
+    label:     '誠品線上',
     envKey:    'ESLITE_POLL_INTERVAL_MS',
     defaultMs: 300_000,
     minMs:     60_000,
