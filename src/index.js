@@ -176,10 +176,9 @@ function startScraperLoop() {
               'poll_interval_ms',
               ENV_INTERVALS.poll_interval_ms
             );
-            const lastCheckMs = parseInt(
-              db.getGuildSetting(guildId, 'ptt_last_check') || '0',
-              10
-            );
+            // guild_id = '' (legacy) 無法用 getGuildSetting 讀寫，改用全域 key fallback
+            const lastCheckKey = guildId ? `guild:${guildId}:ptt_last_check` : 'ptt_last_check';
+            const lastCheckMs = parseInt(db.getSetting(lastCheckKey) || '0', 10);
 
             // Skip guilds that are not due for a check yet
             if (now - lastCheckMs < guildInterval) continue;
@@ -189,7 +188,7 @@ function startScraperLoop() {
             // First time this guild has seen this board — anchor and skip notifications
             if (!guildLastAid) {
               if (currentNewestAid) db.setGuildBoardState(guildId, board, currentNewestAid);
-              if (guildId) db.setGuildSetting(guildId, 'ptt_last_check', String(now));
+              db.setSetting(lastCheckKey, String(now));
               continue;
             }
 
@@ -203,7 +202,8 @@ function startScraperLoop() {
               const notifiedInThisCycle = new Set();
               for (const article of guildNewArticles) {
                 for (const sub of subs) {
-                  const dupKey = `${sub.target_id}-${article.aid}`;
+                  // 用 sub.id 區分不同訂閱規則，避免同一 target 的多個 keyword 互相抑制
+                  const dupKey = `${sub.id}-${article.aid}`;
                   if (notifiedInThisCycle.has(dupKey)) continue;
 
                   let matched = false;
@@ -227,7 +227,7 @@ function startScraperLoop() {
 
             // Update guild board state and last check timestamp
             if (currentNewestAid) db.setGuildBoardState(guildId, board, currentNewestAid);
-            if (guildId) db.setGuildSetting(guildId, 'ptt_last_check', String(now));
+            db.setSetting(lastCheckKey, String(now));
           }
         } catch (err) {
           console.error(`[scraper] Error crawling ${board}:`, err.message);
