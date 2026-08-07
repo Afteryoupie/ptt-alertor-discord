@@ -137,20 +137,20 @@ client.on('interactionCreate', async interaction => {
 // ─── Cross-tick Deduplication ─────────────────────────────────────────────────
 
 /**
- * Module-level Set to prevent duplicate notifications across ticks and
+ * Module-level Map to prevent duplicate notifications across ticks and
  * between /subscribe instant verification and the background scraper.
- * Key format: "targetId-articleAid"
- * Entries auto-expire after 1 hour based on AID timestamp.
+ * Key format: "targetId-articleAid" -> notifiedAt (epoch ms)
+ * Entries auto-expire after 1 hour based on when the notification was sent.
  */
-const recentlyNotified = new Set();
+const recentlyNotified = new Map();
 const RECENTLY_NOTIFIED_TTL_MS = 3600_000; // 1 hour
 
 /**
- * Add a targetId+articleAid pair to the recently-notified set.
+ * Add a targetId+articleAid pair to the recently-notified map.
  * Called by both the scraper loop and /subscribe instant verification.
  */
 function markAsNotified(targetId, articleAid) {
-  recentlyNotified.add(`${targetId}-${articleAid}`);
+  recentlyNotified.set(`${targetId}-${articleAid}`, Date.now());
 }
 
 /**
@@ -161,18 +161,13 @@ function wasRecentlyNotified(targetId, articleAid) {
 }
 
 /**
- * Purge entries older than TTL by extracting the Unix timestamp from the AID.
- * AID format: M.XXXXXXXXXX.A.XXX (XXXXXXXXXX is Unix epoch seconds)
+ * Purge entries older than TTL based on the actual notification timestamp.
  */
 function purgeExpiredNotifications() {
-  const nowSec = Math.floor(Date.now() / 1000);
-  const ttlSec = RECENTLY_NOTIFIED_TTL_MS / 1000;
-  for (const key of recentlyNotified) {
-    const aidPart = key.split('-').slice(1).join('-'); // targetId may contain '-'
-    const tsMatch = /^M\.(\d+)\./.exec(aidPart);
-    if (tsMatch) {
-      const aidTs = parseInt(tsMatch[1], 10);
-      if (nowSec - aidTs > ttlSec) recentlyNotified.delete(key);
+  const now = Date.now();
+  for (const [key, notifiedAt] of recentlyNotified.entries()) {
+    if (now - notifiedAt > RECENTLY_NOTIFIED_TTL_MS) {
+      recentlyNotified.delete(key);
     }
   }
 }

@@ -28,6 +28,7 @@ db.exec(`
     board       TEXT NOT NULL COLLATE NOCASE,
     type        TEXT NOT NULL CHECK(type IN ('keyword', 'author')),
     match_value TEXT NOT NULL,
+    guild_id    TEXT NOT NULL DEFAULT '',
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -46,6 +47,7 @@ db.exec(`
     target_id    TEXT NOT NULL,
     target_type  TEXT NOT NULL CHECK(target_type IN ('channel', 'dm')),
     category_url TEXT NOT NULL,
+    guild_id     TEXT NOT NULL DEFAULT '',
     created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -72,6 +74,7 @@ db.exec(`
     target_id      TEXT NOT NULL,
     target_type    TEXT NOT NULL CHECK(target_type IN ('channel', 'dm')),
     exhibition_id  TEXT NOT NULL,
+    guild_id       TEXT NOT NULL DEFAULT '',
     created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -91,6 +94,7 @@ db.exec(`
     target_id    TEXT NOT NULL,
     target_type  TEXT NOT NULL CHECK(target_type IN ('channel', 'dm')),
     category_url TEXT NOT NULL,
+    guild_id     TEXT NOT NULL DEFAULT '',
     created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -112,6 +116,7 @@ db.exec(`
     search_url   TEXT NOT NULL,
     keyword      TEXT,
     shop_id      TEXT,
+    guild_id     TEXT NOT NULL DEFAULT '',
     created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -191,6 +196,63 @@ for (const table of subTables) {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN guild_id TEXT NOT NULL DEFAULT ''`); } catch (_) {}
 }
 
+// Clean up any pre-existing duplicate subscriptions across all platform tables
+try {
+  db.exec(`
+    DELETE FROM subscriptions
+    WHERE id NOT IN (
+      SELECT MIN(id) FROM subscriptions
+      GROUP BY user_id, target_id, LOWER(board), type, LOWER(match_value)
+    );
+
+    DELETE FROM shop_subscriptions
+    WHERE id NOT IN (
+      SELECT MIN(id) FROM shop_subscriptions
+      GROUP BY user_id, target_id, category_url
+    );
+
+    DELETE FROM eslite_subscriptions
+    WHERE id NOT IN (
+      SELECT MIN(id) FROM eslite_subscriptions
+      GROUP BY user_id, target_id, exhibition_id
+    );
+
+    DELETE FROM momo_subscriptions
+    WHERE id NOT IN (
+      SELECT MIN(id) FROM momo_subscriptions
+      GROUP BY user_id, target_id, category_url
+    );
+
+    DELETE FROM shopee_subscriptions
+    WHERE id NOT IN (
+      SELECT MIN(id) FROM shopee_subscriptions
+      GROUP BY user_id, target_id, search_url
+    );
+  `);
+} catch (err) {
+  console.error('[db] Error cleaning up duplicate subscriptions:', err.message);
+}
+
+// Add UNIQUE indexes to enforce deduplication at the DB level
+try {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_subscriptions_unique 
+    ON subscriptions(user_id, target_id, board COLLATE NOCASE, type, match_value COLLATE NOCASE);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_shop_subs_unique 
+    ON shop_subscriptions(user_id, target_id, category_url);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_eslite_subs_unique 
+    ON eslite_subscriptions(user_id, target_id, exhibition_id);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_momo_subs_unique 
+    ON momo_subscriptions(user_id, target_id, category_url);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_shopee_subs_unique 
+    ON shopee_subscriptions(user_id, target_id, search_url);
+  `);
+} catch (_) {}
+
 // ─── Prepared Statements ────────────────────────────────────────────────────
 
 const stmts = {
@@ -232,7 +294,11 @@ const stmts = {
 
   findSubscription: db.prepare(`
     SELECT id FROM subscriptions
-    WHERE user_id = @user_id AND target_id = @target_id AND board = @board AND type = @type AND match_value = @match_value
+    WHERE user_id = @user_id 
+      AND target_id = @target_id 
+      AND board = @board COLLATE NOCASE 
+      AND type = @type 
+      AND match_value = @match_value COLLATE NOCASE
   `),
 
   // ── Shop restock ──────────────────────────────────────────────────────────

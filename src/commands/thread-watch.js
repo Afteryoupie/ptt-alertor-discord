@@ -126,7 +126,7 @@ async function execute(interaction) {
     let articleUrl;
     try {
       articleUrl = normalizeArticleUrl(rawUrl);
-      if (!/ptt\.cc\/bbs\/.+\/M\.\d+\.[A-Z]\.[A-F0-9]+\.html$/.test(articleUrl)) {
+      if (!/ptt\.cc\/bbs\/.+\/M\.\d+\.[A-Z]\.[A-F0-9]+\.html$/i.test(articleUrl)) {
         throw new Error('非有效的 PTT 文章 URL');
       }
     } catch (err) {

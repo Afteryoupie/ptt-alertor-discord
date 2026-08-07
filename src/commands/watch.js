@@ -14,7 +14,7 @@ const { normalizeArticleUrl, crawlArticle } = require('../thread-scraper');
  * @returns {'shopee' | 'momo' | 'eslite' | 'shop' | 'thread' | null}
  */
 function detectPlatform(inputUrl) {
-  if (/ptt\.cc\/bbs\/.+\/M\.\d+\.[A-Z]\.[A-F0-9]+\.html/.test(inputUrl)) return 'thread';
+  if (/ptt\.cc\/bbs\/.+\/M\.\d+\.[A-Z]\.[A-F0-9]+\.html/i.test(inputUrl)) return 'thread';
   try { parseShopeeUrl(inputUrl); return 'shopee'; } catch (_) {}
   try { parseMomoCategoryInput(inputUrl); return 'momo'; } catch (_) {}
   try { parseEsliteExhibitionUrl(inputUrl); return 'eslite'; } catch (_) {}
