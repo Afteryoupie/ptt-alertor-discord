@@ -175,6 +175,17 @@ db.exec(`
     push_count   INTEGER NOT NULL DEFAULT 0,
     updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- PTT sent notifications log: prevents duplicate cross-restart
+  CREATE TABLE IF NOT EXISTS sent_ptt_notifications (
+    target_id    TEXT NOT NULL,
+    article_aid  TEXT NOT NULL,
+    sent_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (target_id, article_aid)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_sent_ptt_notifications_sent_at
+  ON sent_ptt_notifications(sent_at);
 `);
 
 // Safe migration: add new columns to existing DBs
@@ -637,6 +648,23 @@ const stmts = {
     ON CONFLICT(search_url) DO UPDATE SET
       snapshot_json = excluded.snapshot_json,
       updated_at    = CURRENT_TIMESTAMP
+  `),
+
+  // ── PTT sent notifications ──────────────────────────────────────────────────
+
+  hasPttNotificationBeenSent: db.prepare(`
+    SELECT 1 FROM sent_ptt_notifications
+    WHERE target_id = @target_id AND article_aid = @article_aid
+    LIMIT 1
+  `),
+
+  recordPttSentNotification: db.prepare(`
+    INSERT OR IGNORE INTO sent_ptt_notifications (target_id, article_aid)
+    VALUES (@target_id, @article_aid)
+  `),
+
+  cleanupOldSentNotifications: db.prepare(`
+    DELETE FROM sent_ptt_notifications WHERE sent_at < datetime('now', '-7 days')
   `),
 };
 
@@ -1222,6 +1250,40 @@ function upsertThreadState(article_url, pollOffset, pushCount) {
   });
 }
 
+// ─── PTT Sent Notifications API ──────────────────────────────────────────────
+
+/**
+ * Check if a notification for (targetId, articleAid) has already been sent.
+ * @param {string} targetId   Discord channel or user ID
+ * @param {string} articleAid PTT article AID
+ * @returns {boolean}
+ */
+function hasPttNotificationBeenSent(targetId, articleAid) {
+  return !!stmts.hasPttNotificationBeenSent.get({ target_id: targetId, article_aid: articleAid });
+}
+
+/**
+ * Record that a PTT article notification has been sent to a target.
+ * Uses INSERT OR IGNORE so duplicate calls are safe.
+ * @param {string} targetId   Discord channel or user ID
+ * @param {string} articleAid PTT article AID
+ */
+function recordPttSentNotification(targetId, articleAid) {
+  stmts.recordPttSentNotification.run({ target_id: targetId, article_aid: articleAid });
+}
+
+/**
+ * Delete sent notification records older than 7 days.
+ * Call once at startup to keep the table lightweight.
+ */
+function cleanupOldSentNotifications() {
+  const result = stmts.cleanupOldSentNotifications.run();
+  if (result.changes > 0) {
+    console.log(`[db] 🧹 Cleaned up ${result.changes} expired sent_ptt_notifications records.`);
+  }
+}
+
+
 module.exports = {
   // settings
   getSetting,
@@ -1297,5 +1359,9 @@ module.exports = {
   findThreadSubscription,
   getThreadState,
   upsertThreadState,
+  // ptt sent notifications
+  hasPttNotificationBeenSent,
+  recordPttSentNotification,
+  cleanupOldSentNotifications,
 };
 

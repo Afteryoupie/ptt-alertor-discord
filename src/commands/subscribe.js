@@ -96,17 +96,23 @@ module.exports = {
         }
 
         if (lastMatch) {
-          await sendNotifications(interaction.client, [{
-            article: lastMatch,
-            board,
-            matchType: type,
-            matchValue: matchValue,
-            targetId: targetId,
-            targetType: targetType
-          }]);
-          // Register in cross-tick dedup so background scraper won't re-notify
-          if (interaction.client.markAsNotified) {
-            interaction.client.markAsNotified(targetId, lastMatch.aid);
+          if (db.hasPttNotificationBeenSent(targetId, lastMatch.aid)) {
+            // Already sent to this channel before — don't flood the channel
+            await interaction.followUp({
+              content: `💡 訂閱成功！最新符合的文章（**${lastMatch.title}**）已於稍早發送過，後續有新貼文會第一時間通知您！`,
+              flags: [MessageFlags.Ephemeral],
+            });
+          } else {
+            await sendNotifications(interaction.client, [{
+              article: lastMatch,
+              board,
+              matchType: type,
+              matchValue: matchValue,
+              targetId: targetId,
+              targetType: targetType
+            }]);
+            // Persist to DB so background scraper won't re-send this article
+            db.recordPttSentNotification(targetId, lastMatch.aid);
           }
         } else {
           await interaction.followUp({

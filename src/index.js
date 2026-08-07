@@ -78,13 +78,6 @@ for (const file of fs.readdirSync(commandsDir).filter(f => f.endsWith('.js'))) {
   client.commands.set(cmd.data.name, cmd);
 }
 
-// Expose cross-tick dedup helper so commands (e.g. /subscribe) can register
-// instant-verification notifications and prevent the background scraper from
-// sending them again.
-client.markAsNotified = function (targetId, articleAid) {
-  markAsNotified(targetId, articleAid);
-};
-
 // ─── Event Handlers ───────────────────────────────────────────────────────────
 
 client.once('clientReady', () => {
@@ -98,6 +91,8 @@ client.once('clientReady', () => {
   console.log(`[startup] 🏬 Eslite interval: min ${db.getMinIntervalMsAcrossGuilds('eslite_poll_interval_ms', ENV_INTERVALS.eslite_poll_interval_ms) / 1000}s (${getOpHours('eslite')})`);
   console.log(`[startup] 🛍️  Momo interval:  min ${db.getMinIntervalMsAcrossGuilds('momo_poll_interval_ms', ENV_INTERVALS.momo_poll_interval_ms) / 1000}s (${getOpHours('momo')})`);
   console.log(`[startup] 🟠 Shopee interval: min ${db.getMinIntervalMsAcrossGuilds('shopee_poll_interval_ms', ENV_INTERVALS.shopee_poll_interval_ms) / 1000}s (${getOpHours('shopee')})`);
+  // Clean up PTT sent notification records older than 7 days
+  db.cleanupOldSentNotifications();
   startScraperLoop();
   startThreadScraperLoop();
   startShopScraperLoop();
@@ -133,44 +128,6 @@ client.on('interactionCreate', async interaction => {
     }
   }
 });
-
-// ─── Cross-tick Deduplication ─────────────────────────────────────────────────
-
-/**
- * Module-level Map to prevent duplicate notifications across ticks and
- * between /subscribe instant verification and the background scraper.
- * Key format: "targetId-articleAid" -> notifiedAt (epoch ms)
- * Entries auto-expire after 1 hour based on when the notification was sent.
- */
-const recentlyNotified = new Map();
-const RECENTLY_NOTIFIED_TTL_MS = 3600_000; // 1 hour
-
-/**
- * Add a targetId+articleAid pair to the recently-notified map.
- * Called by both the scraper loop and /subscribe instant verification.
- */
-function markAsNotified(targetId, articleAid) {
-  recentlyNotified.set(`${targetId}-${articleAid}`, Date.now());
-}
-
-/**
- * Check if a targetId+articleAid pair was recently notified.
- */
-function wasRecentlyNotified(targetId, articleAid) {
-  return recentlyNotified.has(`${targetId}-${articleAid}`);
-}
-
-/**
- * Purge entries older than TTL based on the actual notification timestamp.
- */
-function purgeExpiredNotifications() {
-  const now = Date.now();
-  for (const [key, notifiedAt] of recentlyNotified.entries()) {
-    if (now - notifiedAt > RECENTLY_NOTIFIED_TTL_MS) {
-      recentlyNotified.delete(key);
-    }
-  }
-}
 
 // ─── Scraper Loop ─────────────────────────────────────────────────────────────
 
@@ -288,10 +245,9 @@ function startScraperLoop() {
         }
       }
 
-      // Cross-tick dedup: filter out articles already notified by /subscribe or previous tick
-      purgeExpiredNotifications();
+      // Cross-tick dedup: filter out articles already notified (DB-persistent, survives restarts)
       const dedupedMatches = allMatches.filter(m => {
-        if (wasRecentlyNotified(m.targetId, m.article.aid)) {
+        if (db.hasPttNotificationBeenSent(m.targetId, m.article.aid)) {
           console.log(`[scraper] ⏭️ 跳過已通知: ${m.targetId} ← ${m.article.aid}`);
           return false;
         }
@@ -302,9 +258,9 @@ function startScraperLoop() {
       if (dedupedMatches.length) {
         console.log(`[scraper] 🚀 成功匹配！正在發送 ${dedupedMatches.length} 則通知…`);
         await sendNotifications(client, dedupedMatches);
-        // Mark as notified for future dedup
+        // Persist sent records to DB so restarts won't re-send
         for (const m of dedupedMatches) {
-          markAsNotified(m.targetId, m.article.aid);
+          db.recordPttSentNotification(m.targetId, m.article.aid);
         }
       }
 
