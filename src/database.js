@@ -195,8 +195,8 @@ for (const table of subTables) {
 
 const stmts = {
   addSubscription: db.prepare(`
-    INSERT INTO subscriptions (user_id, target_id, target_type, board, type, match_value)
-    VALUES (@user_id, @target_id, @target_type, @board, @type, @match_value)
+    INSERT INTO subscriptions (user_id, target_id, target_type, board, type, match_value, guild_id)
+    VALUES (@user_id, @target_id, @target_type, @board, @type, @match_value, @guild_id)
   `),
 
   removeSubscription: db.prepare(`

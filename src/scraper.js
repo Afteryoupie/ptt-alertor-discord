@@ -109,18 +109,6 @@ function parseArticles(html) {
   return articles;
 }
 
-/**
- * Return only articles newer than lastAid.
- * Uses lexicographic comparison of PTT's "M.XXXXXXXXXX.A.XXX" format.
- * (The timestamp prefix ensures correct ordering.)
- */
-function filterNewArticles(articles, lastAid) {
-  if (!lastAid) {
-    // First run: treat the last article on page as anchor, return nothing to notify
-    return [];
-  }
-  return articles.filter(a => a.aid > lastAid);
-}
 
 /**
  * Get the newest article ID from a list.
@@ -166,28 +154,18 @@ function matchAuthor(articleAuthor, targetAuthor) {
   return articleAuthor.toLowerCase() === targetAuthor.toLowerCase();
 }
 
-// ─── Main Crawl Entry ────────────────────────────────────────────────────────
-
 /**
- * Crawl one board. Returns new articles since lastAid.
- * Also returns the current page's newest AID to update state.
+ * Crawl one board. Returns all parsed articles and the newest AID.
+ * Callers are responsible for filtering new articles against their own last_aid.
  *
  * @param {string} board
- * @param {string|null} lastAid
- * @returns {Promise<{ newArticles: object[], currentNewestAid: string|null }>}
+ * @returns {Promise<{ allArticles: object[], currentNewestAid: string|null }>}
  */
-async function crawlBoard(board, lastAid) {
+async function crawlBoard(board) {
   const html = await fetchBoardPage(board);
   const allArticles = parseArticles(html);
   const currentNewestAid = getNewestAid(allArticles);
-
-  if (!lastAid) {
-    // First time: anchor at current newest, no notifications
-    return { newArticles: [], allArticles, currentNewestAid };
-  }
-
-  const newArticles = filterNewArticles(allArticles, lastAid);
-  return { newArticles, allArticles, currentNewestAid };
+  return { allArticles, currentNewestAid };
 }
 
 module.exports = {

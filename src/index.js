@@ -78,6 +78,13 @@ for (const file of fs.readdirSync(commandsDir).filter(f => f.endsWith('.js'))) {
   client.commands.set(cmd.data.name, cmd);
 }
 
+// Expose cross-tick dedup helper so commands (e.g. /subscribe) can register
+// instant-verification notifications and prevent the background scraper from
+// sending them again.
+client.markAsNotified = function (targetId, articleAid) {
+  markAsNotified(targetId, articleAid);
+};
+
 // ─── Event Handlers ───────────────────────────────────────────────────────────
 
 client.once('clientReady', () => {
@@ -127,6 +134,49 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
+// ─── Cross-tick Deduplication ─────────────────────────────────────────────────
+
+/**
+ * Module-level Set to prevent duplicate notifications across ticks and
+ * between /subscribe instant verification and the background scraper.
+ * Key format: "targetId-articleAid"
+ * Entries auto-expire after 1 hour based on AID timestamp.
+ */
+const recentlyNotified = new Set();
+const RECENTLY_NOTIFIED_TTL_MS = 3600_000; // 1 hour
+
+/**
+ * Add a targetId+articleAid pair to the recently-notified set.
+ * Called by both the scraper loop and /subscribe instant verification.
+ */
+function markAsNotified(targetId, articleAid) {
+  recentlyNotified.add(`${targetId}-${articleAid}`);
+}
+
+/**
+ * Check if a targetId+articleAid pair was recently notified.
+ */
+function wasRecentlyNotified(targetId, articleAid) {
+  return recentlyNotified.has(`${targetId}-${articleAid}`);
+}
+
+/**
+ * Purge entries older than TTL by extracting the Unix timestamp from the AID.
+ * AID format: M.XXXXXXXXXX.A.XXX (XXXXXXXXXX is Unix epoch seconds)
+ */
+function purgeExpiredNotifications() {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const ttlSec = RECENTLY_NOTIFIED_TTL_MS / 1000;
+  for (const key of recentlyNotified) {
+    const aidPart = key.split('-').slice(1).join('-'); // targetId may contain '-'
+    const tsMatch = /^M\.(\d+)\./.exec(aidPart);
+    if (tsMatch) {
+      const aidTs = parseInt(tsMatch[1], 10);
+      if (nowSec - aidTs > ttlSec) recentlyNotified.delete(key);
+    }
+  }
+}
+
 // ─── Scraper Loop ─────────────────────────────────────────────────────────────
 
 /**
@@ -167,7 +217,7 @@ function startScraperLoop() {
       for (const board of boards) {
         try {
           // Crawl board once; reuse allArticles for all guilds
-          const { allArticles, currentNewestAid } = await crawlBoard(board, null);
+          const { allArticles, currentNewestAid } = await crawlBoard(board);
           const guilds = db.getDistinctGuildsForBoard(board);
 
           for (const guildId of guilds) {
@@ -243,10 +293,24 @@ function startScraperLoop() {
         }
       }
 
+      // Cross-tick dedup: filter out articles already notified by /subscribe or previous tick
+      purgeExpiredNotifications();
+      const dedupedMatches = allMatches.filter(m => {
+        if (wasRecentlyNotified(m.targetId, m.article.aid)) {
+          console.log(`[scraper] ⏭️ 跳過已通知: ${m.targetId} ← ${m.article.aid}`);
+          return false;
+        }
+        return true;
+      });
+
       // Send all collected notifications
-      if (allMatches.length) {
-        console.log(`[scraper] 🚀 成功匹配！正在發送 ${allMatches.length} 則通知…`);
-        await sendNotifications(client, allMatches);
+      if (dedupedMatches.length) {
+        console.log(`[scraper] 🚀 成功匹配！正在發送 ${dedupedMatches.length} 則通知…`);
+        await sendNotifications(client, dedupedMatches);
+        // Mark as notified for future dedup
+        for (const m of dedupedMatches) {
+          markAsNotified(m.targetId, m.article.aid);
+        }
       }
 
       console.log(`[scraper] === 循環結束 (${new Date().toLocaleTimeString('zh-TW')}) ===`);

@@ -82,7 +82,7 @@ module.exports = {
       // --- Instant Verification ---
       try {
         // Fetch current articles via crawlBoard (reuses the same HTTP request)
-        const { allArticles, currentNewestAid } = await crawlBoard(board, null);
+        const { allArticles, currentNewestAid } = await crawlBoard(board);
 
         // Find the LATEST (last in the array) that matches
         let lastMatch = null;
@@ -104,6 +104,10 @@ module.exports = {
             targetId: targetId,
             targetType: targetType
           }]);
+          // Register in cross-tick dedup so background scraper won't re-notify
+          if (interaction.client.markAsNotified) {
+            interaction.client.markAsNotified(targetId, lastMatch.aid);
+          }
         } else {
           await interaction.followUp({
             content: `💡 訂閱成功，但在 **[${board}]** 的首頁目前沒看到符合 \`${matchValue}\` 的最新文章。\n之後若有新貼文我會立刻通知您！`,
@@ -117,7 +121,10 @@ module.exports = {
         // 以及全域 board_state（確保舊路徑也正確）
         if (currentNewestAid) {
           const guildId = interaction.guildId || '';
-          db.setGuildBoardState(guildId, board, currentNewestAid);
+          const existing = db.getGuildBoardState(guildId, board);
+          if (!existing || currentNewestAid > existing) {
+            db.setGuildBoardState(guildId, board, currentNewestAid);
+          }
         }
 
       } catch (crawlErr) {
