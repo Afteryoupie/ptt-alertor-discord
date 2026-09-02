@@ -92,7 +92,7 @@ pm2 restart music-bot
 - **更新 Discord 斜線指令 (Slash Commands)**
   *(當您新增、刪除或修改指令名稱時才需要執行)*
   ```bash
-  node scripts/deploy-commands.js
+  npm run deploy-commands
   ```
 - **查看硬碟佔用 (如果發現空間變少)**
   ```bash

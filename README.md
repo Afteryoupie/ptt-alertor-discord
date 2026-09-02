@@ -38,12 +38,6 @@ npm start
 
 ## 📜 指令說明
 
-### 🌟 全平台統一追蹤指令 (Unified Watch)
-- `/watch add <url>` - 網址智慧自動識別。自動辨識網址為蝦皮、momo、誠品或 Funbox 並加入追蹤。
-- `/watch shopee <url>` / `/watch momo <url>` / `/watch eslite <url>` / `/watch funbox <url>` - 子平台指定追蹤。
-- `/watch list` - 列出全頻道/私訊的全平台追蹤清單（同 `/list`）。
-- `/watch remove <id>` - 依據全區編號刪除追蹤（同 `/unsubscribe`）。
-
 ### PTT 文章追蹤
 - `/subscribe` - 訂閱看板關鍵字或作者。支援多關鍵字、排除詞、作者追蹤。
 - `/list` - 查看目前在該頻道/私訊的所有訂閱清單。
