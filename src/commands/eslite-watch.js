@@ -44,6 +44,8 @@ module.exports = {
     const targetType = isDM ? 'dm' : 'channel';
     const userId     = interaction.user.id;
 
+    await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
     // ── ADD ──────────────────────────────────────────────────────────────────
     if (sub === 'add') {
       const rawUrl = interaction.options.getString('url', true);
@@ -52,25 +54,22 @@ module.exports = {
       try {
         exhibitionId = parseExhibitionId(rawUrl);
       } catch (err) {
-        return interaction.reply({
+        return interaction.editReply({
           content: `❌ ${err.message || '無效的輸入'}，請輸入誠品展覽頁面網址或代碼，例如：\n\`https://www.eslite.com/exhibitions/CU202503-00091\` 或 \`CU202503-00091\``,
-          flags: [MessageFlags.Ephemeral],
         });
       }
 
       if (!exhibitionId) {
-        return interaction.reply({
+        return interaction.editReply({
           content: '❌ 無法解析展覽 ID，請確認 URL 格式正確。',
-          flags: [MessageFlags.Ephemeral],
         });
       }
 
       // Check duplicate
       const existing = db.findEsliteSubscription({ user_id: userId, target_id: targetId, exhibition_id: exhibitionId });
       if (existing) {
-        return interaction.reply({
+        return interaction.editReply({
           content: `⚠️ 這個展覽頁面已經在追蹤中了（ID: ${existing.id}）`,
-          flags: [MessageFlags.Ephemeral],
         });
       }
 
@@ -82,7 +81,7 @@ module.exports = {
         guild_id:      interaction.guildId || '',
       });
 
-      return interaction.reply({
+      return interaction.editReply({
         content: [
           `✅ **誠品補貨追蹤已新增！** (ID: \`${id}\`)`,
           ``,
@@ -101,13 +100,12 @@ module.exports = {
       const changed = db.removeEsliteSubscription({ id, user_id: userId });
 
       if (!changed) {
-        return interaction.reply({
+        return interaction.editReply({
           content: `❌ 找不到 ID \`${id}\` 的訂閱，或者該訂閱不屬於你。`,
-          flags: [MessageFlags.Ephemeral],
         });
       }
 
-      return interaction.reply({
+      return interaction.editReply({
         content: `✅ 已移除誠品補貨追蹤訂閱（ID: \`${id}\`）`,
       });
     }
@@ -117,9 +115,8 @@ module.exports = {
       const subs = db.listEsliteSubscriptions({ user_id: userId, target_id: targetId });
 
       if (!subs.length) {
-        return interaction.reply({
+        return interaction.editReply({
           content: '📭 目前沒有任何誠品補貨追蹤。\n使用 `/eslite-watch add` 新增！',
-          flags: [MessageFlags.Ephemeral],
         });
       }
 
@@ -127,7 +124,7 @@ module.exports = {
         `\`${String(s.id).padStart(3)}\` ｜ ${s.target_type === 'dm' ? '📩 DM' : '📢 頻道'} ｜ \`${s.exhibition_id}\`\n  🔗 ${exhibitionUrl(s.exhibition_id)}`
       );
 
-      return interaction.reply({
+      return interaction.editReply({
         content: [
           `📋 **目前的誠品補貨追蹤訂閱（${subs.length} 筆）：**`,
           '',
@@ -135,7 +132,6 @@ module.exports = {
           '',
           '使用 `/eslite-watch remove <ID>` 移除訂閱，或使用 `/list` 檢視全平台追蹤。',
         ].join('\n'),
-        flags: [MessageFlags.Ephemeral],
       });
     }
   },

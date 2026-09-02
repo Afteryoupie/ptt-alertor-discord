@@ -209,11 +209,13 @@ module.exports = {
 
     const rawInput = interaction.options.getString('url', true);
 
+    await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
     let platform = null;
     if (sub === 'add') {
       platform = detectPlatform(rawInput);
       if (!platform) {
-        return interaction.reply({
+        return interaction.editReply({
           content: [
             '❌ 無法自動辨識該網址所屬平台，請確認網址格式正確。',
             '',
@@ -223,7 +225,6 @@ module.exports = {
             '• **誠品線上**：`https://www.eslite.com/exhibitions/CU202503-00091` 或輸入展覽代碼',
             '• **Funbox 商店**：`https://shop.funbox.com.tw/categories/XI/KB`',
           ].join('\n'),
-          flags: [MessageFlags.Ephemeral],
         });
       }
     } else {
@@ -235,13 +236,12 @@ module.exports = {
       const result = handleAddByPlatform(platform, rawInput, userId, targetId, targetType, interaction.guildId);
 
       if (result.status === 'exists') {
-        return interaction.reply({
+        return interaction.editReply({
           content: result.message,
-          flags: [MessageFlags.Ephemeral],
         });
       }
 
-      return interaction.reply({
+      return interaction.editReply({
         content: [
           `✅ **已成功新增補貨追蹤！**`,
           ``,
@@ -255,9 +255,8 @@ module.exports = {
         ].join('\n'),
       });
     } catch (err) {
-      return interaction.reply({
+      return interaction.editReply({
         content: `❌ 新增追蹤失敗：${err.message}`,
-        flags: [MessageFlags.Ephemeral],
       });
     }
   },

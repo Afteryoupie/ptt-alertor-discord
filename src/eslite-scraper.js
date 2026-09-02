@@ -60,17 +60,67 @@ function exhibitionUrl(exhibitionId) {
   return `${ESLITE_EXHIBITION_BASE}/${exhibitionId}`;
 }
 
+let cachedCookie = null;
+let cookieExpiry = 0;
+
+/**
+ * Obtain a valid Cloudflare session cookie (__cf_bm) from eslite.com homepage.
+ * Cached for 25 minutes.
+ */
+async function getEsliteCookie(userAgent, dispatcher) {
+  const now = Date.now();
+  if (cachedCookie && now < cookieExpiry) {
+    return cachedCookie;
+  }
+
+  try {
+    const fetchOptions = {
+      headers: {
+        'User-Agent': userAgent,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8',
+      },
+      signal: AbortSignal.timeout(10_000),
+    };
+    if (dispatcher) fetchOptions.dispatcher = dispatcher;
+
+    const res = await fetch('https://www.eslite.com/', fetchOptions);
+    const setCookie = res.headers.get('set-cookie');
+    if (setCookie) {
+      const parts = setCookie.split(',').map(c => c.split(';')[0].trim());
+      cachedCookie = parts.join('; ');
+      cookieExpiry = now + 25 * 60 * 1000;
+      return cachedCookie;
+    }
+  } catch (err) {
+    // Non-fatal, will try direct fetch
+  }
+  return '';
+}
+
 /**
  * Fetch all products from an Eslite exhibition page via the public API.
- * Handles 404 (exhibition sold out / temporarily hidden) gracefully by returning an empty list.
+ * Handles 404 gracefully (empty list) and 403 gracefully (returns null with warning).
  * @param {string} exhibitionId  e.g. "CU202503-00091"
- * @returns {Promise<object[]>}  flat array of product info objects
+ * @returns {Promise<object[]|null>} flat array of product info objects, or null on 403
  */
 async function fetchExhibitionProducts(exhibitionId) {
+  let dispatcher = undefined;
+  const proxyUrl = process.env.ESLITE_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+  if (proxyUrl) {
+    try {
+      const { ProxyAgent } = require('undici');
+      dispatcher = new ProxyAgent(proxyUrl);
+    } catch (_) {}
+  }
+
+  const ua = randomUA();
+  const cookie = await getEsliteCookie(ua, dispatcher);
+
   const url = `${ESLITE_API_BASE}/${exhibitionId}`;
-  const res = await fetch(url, {
+  const fetchOptions = {
     headers: {
-      'User-Agent': randomUA(),
+      'User-Agent': ua,
       'Accept': 'application/json, text/plain, */*',
       'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
       'Referer': `${ESLITE_EXHIBITION_BASE}/${exhibitionId}`,
@@ -80,11 +130,27 @@ async function fetchExhibitionProducts(exhibitionId) {
       'Sec-Fetch-Site': 'same-site',
     },
     signal: AbortSignal.timeout(15_000),
-  });
+  };
+  if (cookie) {
+    fetchOptions.headers['Cookie'] = cookie;
+  }
+  if (dispatcher) {
+    fetchOptions.dispatcher = dispatcher;
+  }
+
+  const res = await fetch(url, fetchOptions);
 
   if (res.status === 404) {
     // Exhibition is currently closed, sold out or not published
     return [];
+  }
+
+  if (res.status === 403) {
+    // Reset cached cookie to force refresh on next try
+    cachedCookie = null;
+    cookieExpiry = 0;
+    console.warn(`[eslite] [${exhibitionId}] ⚠️ 遇到 Cloudflare 403（機房 IP 或會話受阻），暫時跳過本輪更新以防誤判。`);
+    return null;
   }
 
   if (!res.ok) {
@@ -141,6 +207,7 @@ function flattenProducts(data) {
  */
 async function snapshotExhibition(exhibitionId) {
   const products = await fetchExhibitionProducts(exhibitionId);
+  if (!products) return null;
   const snapshot = new Map();
 
   for (const p of products) {
