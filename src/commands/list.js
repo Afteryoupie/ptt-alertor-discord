@@ -43,6 +43,7 @@ module.exports = {
       // Group items by platform for beautiful display, while maintaining continuous index numbers
       const sections = {
         ptt: { title: '🔑 **PTT 訂閱**', items: [] },
+        thread: { title: '💬 **PTT 置底推文監控**', items: [] },
         shop: { title: '🛍️ **Funbox 商店補貨**', items: [] },
         momo: { title: '🍑 **momo 補貨**', items: [] },
         eslite: { title: '📚 **誠品展覽補貨**', items: [] },
@@ -56,6 +57,11 @@ module.exports = {
         if (r.platform === 'ptt') {
           const icon = r.type === 'keyword' ? '🔑' : '👤';
           sections.ptt.items.push(`\`${num}\`. ${icon} **[${r.board}]** ${r.match_value} (${dest}) \`[ptt-${r.id}]\``);
+        } else if (r.platform === 'thread') {
+          const m = /\/bbs\/([^/]+)\/([^/]+\.html)/.exec(r.article_url);
+          const post = m ? `**[${m[1]}]** \`${m[2]}\`` : `\`${r.article_url}\``;
+          const kw = r.keyword ? ` (🔍 ${r.keyword})` : '';
+          sections.thread.items.push(`\`${num}\`. 💬 ${post}${kw} (${dest}) \`[thread-${r.id}]\``);
         } else if (r.platform === 'shop') {
           sections.shop.items.push(`\`${num}\`. 🛍️ **[Funbox]** ${shopLabel(r.category_url)} (${dest}) \`[shop-${r.id}]\``);
         } else if (r.platform === 'momo') {

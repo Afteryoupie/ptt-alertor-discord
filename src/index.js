@@ -86,7 +86,7 @@ client.once('clientReady', () => {
   const getOpHours = (key) => `${db.getSetting(key + '_op_hour_start') || '10'}:00-${db.getSetting(key + '_op_hour_end') || '19'}:00`;
 
   console.log(`[startup] 🕒 PTT interval:    min ${db.getMinIntervalMsAcrossGuilds('poll_interval_ms', ENV_INTERVALS.poll_interval_ms) / 1000}s (varies by guild) (${getOpHours('ptt')})`);
-  console.log(`[startup] 💬 Thread interval: min ${db.getMinIntervalMsAcrossGuilds('thread_poll_interval_ms', ENV_INTERVALS.thread_poll_interval_ms) / 1000}s (${getOpHours('ptt')})`);
+  console.log(`[startup] 💬 Thread interval: min ${db.getMinIntervalMsAcrossGuilds('thread_poll_interval_ms', ENV_INTERVALS.thread_poll_interval_ms) / 1000}s (${getOpHours('thread')})`);
   console.log(`[startup] 🛒 Shop interval:   min ${db.getMinIntervalMsAcrossGuilds('shop_poll_interval_ms', ENV_INTERVALS.shop_poll_interval_ms) / 1000}s (${getOpHours('shop')})`);
   console.log(`[startup] 🏬 Eslite interval: min ${db.getMinIntervalMsAcrossGuilds('eslite_poll_interval_ms', ENV_INTERVALS.eslite_poll_interval_ms) / 1000}s (${getOpHours('eslite')})`);
   console.log(`[startup] 🛍️  Momo interval:  min ${db.getMinIntervalMsAcrossGuilds('momo_poll_interval_ms', ENV_INTERVALS.momo_poll_interval_ms) / 1000}s (${getOpHours('momo')})`);
@@ -318,7 +318,7 @@ function startThreadScraperLoop() {
       return;
     }
 
-    if (!isWithinOperatingHours('ptt')) {
+    if (!isWithinOperatingHours('thread')) {
       console.log(`[thread] ⏰ 目前非設定的營業時間，跳過循環。`);
       return;
     }

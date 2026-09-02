@@ -23,6 +23,14 @@ const INTERVAL_CONFIGS = {
     minMs:     60_000,    // 最短 1 分鐘
     maxMs:     3_600_000, // 最長 1 小時
   },
+  thread: {
+    key:       'thread_poll_interval_ms',
+    label:     'PTT 置底推文',
+    envKey:    'THREAD_POLL_INTERVAL_MS',
+    defaultMs: 180_000,
+    minMs:     60_000,
+    maxMs:     3_600_000,
+  },
   shop: {
     key:       'shop_poll_interval_ms',
     label:     'Funbox 商店',

@@ -23,6 +23,12 @@ function formatSubDescription(sub) {
   switch (sub.platform) {
     case 'ptt':
       return `🔑 **[PTT ${sub.board}]** ${sub.match_value} \`[ptt-${sub.id}]\``;
+    case 'thread': {
+      const m = /\/bbs\/([^/]+)\/([^/]+\.html)/.exec(sub.article_url);
+      const post = m ? `[PTT ${m[1]}] ${m[2]}` : sub.article_url;
+      const kw = sub.keyword ? ` (🔍 ${sub.keyword})` : '';
+      return `💬 **[PTT 置底推文]** ${post}${kw} \`[thread-${sub.id}]\``;
+    }
     case 'shop':
       return `🛍️ **[Funbox]** ${shopLabel(sub.category_url)} \`[shop-${sub.id}]\``;
     case 'momo':
@@ -40,6 +46,11 @@ function getSubLabel(sub) {
   switch (sub.platform) {
     case 'ptt':
       return `[PTT ${sub.board}] ${sub.match_value}`;
+    case 'thread': {
+      const m = /\/bbs\/([^/]+)\/([^/]+\.html)/.exec(sub.article_url);
+      const post = m ? `[PTT ${m[1]}] ${m[2]}` : `[PTT] ${sub.article_url}`;
+      return sub.keyword ? `${post} 🔍${sub.keyword}` : post;
+    }
     case 'shop':
       return `[Funbox] ${shopLabel(sub.category_url)}`;
     case 'momo':
@@ -80,8 +91,8 @@ module.exports = {
 
       let targetSub = null;
 
-      // Case 1: Target is platform-id format like "shop-3", "shopee-12", "momo-4", "eslite-5", "ptt-1"
-      const platformMatch = rawTarget.toLowerCase().match(/^(ptt|shop|momo|eslite|shopee)[-_:]?(\d+)$/);
+      // Case 1: Target is platform-id format like "shop-3", "shopee-12", "momo-4", "eslite-5", "ptt-1", "thread-2"
+      const platformMatch = rawTarget.toLowerCase().match(/^(ptt|thread|shop|momo|eslite|shopee)[-_:]?(\d+)$/);
       if (platformMatch) {
         const [, platform, idStr] = platformMatch;
         const id = parseInt(idStr, 10);

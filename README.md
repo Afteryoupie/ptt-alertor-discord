@@ -40,8 +40,11 @@ npm start
 
 ### PTT 文章追蹤
 - `/subscribe` - 訂閱看板關鍵字或作者。支援多關鍵字、排除詞、作者追蹤。
-- `/list` - 查看目前在該頻道/私訊的所有訂閱清單。
-- `/unsubscribe` - 依據編號（可從 `/list` 取得）取消訂閱。
+- `/thread-watch add <url>` - 監控 PTT 置底貼文的推文交易（即時通知新推文，支援關鍵字過濾）。
+- `/thread-watch list` - 列出此頻道/私訊目前的置底推文監控。
+- `/thread-watch remove <id>` - 依據 ID 移除置底推文監控。
+- `/list` - 查看目前在該頻道/私訊的所有訂閱清單（涵蓋 PTT、置底推文、Funbox、誠品、momo、蝦皮）。
+- `/unsubscribe` - 依據全區編號或平台 ID（例如 `thread-1`、`1`）取消訂閱，支援下拉自動補齊。
 
 ### 🛒 Funbox 商店補貨追蹤
 - `/funbox-watch add <url>` - 新增補貨追蹤。輸入 Funbox 商品分類頁面網址，當該分類有商品從缺貨變為有貨時發送通知。
@@ -64,7 +67,7 @@ npm start
 - `/shopee-watch remove <id>` - 依據 ID 移除蝦皮追蹤。
 
 ### ⚙️ 系統設定 (限伺服器管理員)
-- `/config interval-set` - 設定特定掃描器（PTT/Funbox/誠品/momo）的輪詢間隔時間 (1-60 分鐘)。
+- `/config interval-set` - 設定特定掃描器（PTT 看板/PTT 置底推文/Funbox/誠品/momo/蝦皮）的輪詢間隔時間 (1-60 分鐘)。
 - `/config interval-get` - 查看所有掃描器的輪詢間隔設定。
 - `/config interval-reset` - 重設特定掃描器的輪詢間隔為環境變數預設值。
 - `/config hours-set` - 設定特定掃描器的運作時間 (24小時制，設定 0-24 即可全天運作)。

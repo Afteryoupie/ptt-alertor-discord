@@ -1,6 +1,6 @@
 # 🤖 機器人日常維護指令速查表 (Cheatsheet)
 
-這份文件記錄了您維護 Discord 音樂機器人時最常使用的指令，您可以隨時透過 SSH 參考。
+這份文件記錄了您維護 PTT Alertor Discord 機器人時最常使用的指令，您可以隨時透過 SSH 參考。
 
 ---
 
@@ -13,15 +13,15 @@
   ```
 - **查看即時日誌 (除錯必備)**
   ```bash
-  pm2 logs music-bot
+  pm2 logs ptt-alertor
   ```
 - **手動立即重啟**
   ```bash
-  pm2 restart music-bot
+  pm2 restart ptt-alertor
   ```
 - **設定「每日凌晨 4 點」定時自動重啟**
   ```bash
-  pm2 restart music-bot --cron-restart="0 4 * * *"
+  pm2 restart ptt-alertor --cron-restart="0 4 * * *"
   pm2 save
   ```
 - **監控面板 (圖形化查看 CPU/記憶體)**
@@ -31,9 +31,9 @@
 - **從零開始啟動 / 重新指定執行資料夾**
   *(當您遇到「找不到 package.json」錯誤時，可使用此方式重新建立)*
   ```bash
-  pm2 delete music-bot
-  cd ~/discord-music-bot  # 請替換為您實際的機器人資料夾名稱
-  pm2 start npm --name "music-bot" -- start
+  pm2 delete ptt-alertor
+  cd ~/ptt-alertor-discord  # 請確認為實際專案資料夾名稱
+  pm2 start npm --name "ptt-alertor" -- start
   pm2 save
   ```
 
@@ -51,9 +51,10 @@ git push
 
 ### 在「伺服器」抓取更新：
 ```bash
-cd ~/discord-music-bot
-git pull
-pm2 restart music-bot
+cd ~/ptt-alertor-discord
+git pull origin main
+npm run deploy-commands  # 若有新增/修改/刪除指令時必跑
+pm2 restart ptt-alertor
 ```
 
 ---

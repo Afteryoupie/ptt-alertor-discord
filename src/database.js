@@ -1146,12 +1146,13 @@ function upsertShopeeSnapshot(search_url, snapshotObj) {
  */
 function getUserAllSubscriptions({ user_id, target_id }) {
   const ptt = stmts.listByUser.all({ user_id, target_id }).map(r => ({ ...r, platform: 'ptt' }));
+  const thread = stmts.listThreadByUser.all({ user_id, target_id }).map(r => ({ ...r, platform: 'thread' }));
   const shop = stmts.listShopByUser.all({ user_id, target_id }).map(r => ({ ...r, platform: 'shop' }));
   const momo = stmts.listMomoByUser.all({ user_id, target_id }).map(r => ({ ...r, platform: 'momo' }));
   const eslite = stmts.listEsliteByUser.all({ user_id, target_id }).map(r => ({ ...r, platform: 'eslite' }));
   const shopee = stmts.listShopeeByUser.all({ user_id, target_id }).map(r => ({ ...r, platform: 'shopee' }));
 
-  return [...ptt, ...shop, ...momo, ...eslite, ...shopee];
+  return [...ptt, ...thread, ...shop, ...momo, ...eslite, ...shopee];
 }
 
 /**
