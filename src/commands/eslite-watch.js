@@ -2,27 +2,27 @@
 
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const db = require('../database');
-const { parseEsliteSearch, esliteSearchUrl } = require('../eslite-scraper');
+const { parseExhibitionId, exhibitionUrl } = require('../eslite-scraper');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('eslite-watch')
-    .setDescription('管理誠品線上關鍵字搜尋補貨通知')
+    .setDescription('管理誠品展覽頁面補貨通知')
     .addSubcommand(sub =>
       sub
         .setName('add')
-        .setDescription('新增誠品關鍵字搜尋追蹤：有商品補貨/新上架時通知此頻道')
+        .setDescription('新增誠品展覽頁面追蹤：有商品補貨時通知此頻道')
         .addStringOption(opt =>
           opt
-            .setName('keyword')
-            .setDescription('誠品搜尋網址或關鍵字，例如 beyblade x 或 https://www.eslite.com/Search?keyword=...')
+            .setName('url')
+            .setDescription('誠品展覽頁面 URL 或展覽代碼，例如 https://www.eslite.com/exhibitions/CU202503-00091')
             .setRequired(true)
         )
     )
     .addSubcommand(sub =>
       sub
         .setName('remove')
-        .setDescription('移除誠品關鍵字追蹤')
+        .setDescription('移除誠品展覽追蹤')
         .addIntegerOption(opt =>
           opt
             .setName('id')
@@ -46,47 +46,51 @@ module.exports = {
 
     // ── ADD ──────────────────────────────────────────────────────────────────
     if (sub === 'add') {
-      const rawInput = interaction.options.getString('keyword') || interaction.options.getString('url') || '';
+      const rawUrl = interaction.options.getString('url', true);
 
-      let parsed;
+      let exhibitionId;
       try {
-        parsed = parseEsliteSearch(rawInput);
+        exhibitionId = parseExhibitionId(rawUrl);
       } catch (err) {
         return interaction.reply({
-          content: `❌ ${err.message || '無效的關鍵字或網址'}，請輸入關鍵字或誠品搜尋網址，例如：\n\`beyblade x\` 或 \`https://www.eslite.com/Search?keyword=beyblade+x\``,
+          content: `❌ ${err.message || '無效的輸入'}，請輸入誠品展覽頁面網址或代碼，例如：\n\`https://www.eslite.com/exhibitions/CU202503-00091\` 或 \`CU202503-00091\``,
           flags: [MessageFlags.Ephemeral],
         });
       }
 
-      const { keyword, canonicalUrl } = parsed;
+      if (!exhibitionId) {
+        return interaction.reply({
+          content: '❌ 無法解析展覽 ID，請確認 URL 格式正確。',
+          flags: [MessageFlags.Ephemeral],
+        });
+      }
 
       // Check duplicate
-      const existing = db.findEsliteSubscription({ user_id: userId, target_id: targetId, keyword });
+      const existing = db.findEsliteSubscription({ user_id: userId, target_id: targetId, exhibition_id: exhibitionId });
       if (existing) {
         return interaction.reply({
-          content: `⚠️ 關鍵字「${keyword}」已經在追蹤中了（ID: ${existing.id}）`,
+          content: `⚠️ 這個展覽頁面已經在追蹤中了（ID: ${existing.id}）`,
           flags: [MessageFlags.Ephemeral],
         });
       }
 
       const id = db.addEsliteSubscription({
-        user_id:     userId,
-        target_id:   targetId,
-        target_type: targetType,
-        keyword,
-        search_url:  canonicalUrl,
-        guild_id:    interaction.guildId || '',
+        user_id:       userId,
+        target_id:     targetId,
+        target_type:   targetType,
+        exhibition_id: exhibitionId,
+        guild_id:      interaction.guildId || '',
       });
 
       return interaction.reply({
         content: [
           `✅ **誠品補貨追蹤已新增！** (ID: \`${id}\`)`,
           ``,
-          `🔍 **追蹤關鍵字：** 「${keyword}」`,
-          `🔗 ${canonicalUrl}`,
+          `📦 **展覽代碼：** \`${exhibitionId}\``,
+          `🔗 ${exhibitionUrl(exhibitionId)}`,
           ``,
-          `當搜尋結果有商品補貨、正式開賣或新上架時，我會在這裡通知你！`,
-          `（第一次掃描會建立庫存基準，之後才會通知補貨變動）`,
+          `當展覽頁面有商品從缺貨變為有貨時，我會在這裡通知你！`,
+          `（第一次掃描會建立庫存基準，之後才會通知補貨變動；若展覽暫時下架亦會持續監控直到補貨開展）`,
         ].join('\n'),
       });
     }
@@ -120,7 +124,7 @@ module.exports = {
       }
 
       const lines = subs.map(s =>
-        `\`${String(s.id).padStart(3)}\` ｜ ${s.target_type === 'dm' ? '📩 DM' : '📢 頻道'} ｜ 關鍵字：「${s.keyword}」\n  🔗 ${s.search_url || esliteSearchUrl(s.keyword)}`
+        `\`${String(s.id).padStart(3)}\` ｜ ${s.target_type === 'dm' ? '📩 DM' : '📢 頻道'} ｜ \`${s.exhibition_id}\`\n  🔗 ${exhibitionUrl(s.exhibition_id)}`
       );
 
       return interaction.reply({

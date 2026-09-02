@@ -1,7 +1,7 @@
 #!/bin/bash
 # gitpush.sh - Commit and push changes to git repository
 
-COMMIT_MSG="${1:-feat: 新增全平台 /watch 統一指令、移除 auto-buy、優化蝦皮與 momo 追蹤}"
+COMMIT_MSG="${1:-feat: 誠品改回展覽監控模式（支援售完下架404輪詢）與全爬蟲 User-Agent 防護升級}"
 
 echo "📦 正在 Staging 修改與刪除的檔案..."
 git add -A

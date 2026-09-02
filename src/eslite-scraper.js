@@ -1,176 +1,156 @@
 'use strict';
 
-// ─── Eslite Keyword Search Scraper ──────────────────────────────────────────
-// Tracks product restocks and new arrivals on eslite.com via keyword search.
-// Uses the public Holmes Search API: https://holmes.eslite.com/v1/search
+// ─── Eslite Exhibition Scraper ────────────────────────────────────────────────
+// Tracks product stock on eslite.com exhibition pages.
+// Uses the public JSON API: https://athena.eslite.com/api/v1/book_exhibits/<id>
 //
 // Stock detection logic:
-//   button_status == "add_to_shopping_cart"  → in stock / purchaseable (可立即購買)
-//   button_status == "coming_soon_book" | "coming_soon_not_book" → pre-order / coming soon (即將開賣/預購)
-//   button_status == "not_add_to_notice" | "can_not_buy" → out of stock (缺貨 / 無法購買)
+//   stock > 0  — has real inventory quantity
+//   stock == -1 — "continue" orderable (補貨中可訂購), treated as in-stock
+//   stock == 0  — out of stock
+//   status == "coming_soon_not_book" — pre-order / not yet on sale
 
-const HOLMES_SEARCH_API = 'https://holmes.eslite.com/v1/search';
+const ESLITE_API_BASE = 'https://athena.eslite.com/api/v1/book_exhibits';
 const ESLITE_PRODUCT_BASE = 'https://www.eslite.com/product';
-const ESLITE_SEARCH_BASE = 'https://www.eslite.com/Search';
+const ESLITE_EXHIBITION_BASE = 'https://www.eslite.com/exhibitions';
 
-const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4) AppleWebKit/605.1.15 Version/17.3 Safari/605.1.15';
+const USER_AGENTS = [
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4) AppleWebKit/605.1.15 Version/17.3 Safari/605.1.15',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/605.1.15 Version/17.2 Safari/605.1.15',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_1) AppleWebKit/605.1.15 Version/17.1 Safari/605.1.15',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/605.1.15 Version/17.2 Safari/605.1.15',
+];
 
-/**
- * Parse an Eslite search URL or bare keyword string into a canonical { keyword, canonicalUrl }.
- * Supports formats like:
- *   https://www.eslite.com/Search?keyword=beyblade+x&final_price=0,...
- *   https://www.eslite.com/Search?q=beyblade+x
- *   beyblade x
- *
- * @param {string} input
- * @returns {{ keyword: string, canonicalUrl: string }}
- */
-function parseEsliteSearch(input) {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    throw new Error('請輸入有效的誠品搜尋網址或關鍵字');
-  }
-
-  let keyword = null;
-
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    try {
-      const u = new URL(trimmed);
-      keyword = u.searchParams.get('keyword') || u.searchParams.get('q');
-      if (keyword) {
-        keyword = keyword.trim();
-      }
-    } catch (_) {
-      throw new Error(`無效的 URL 格式: ${trimmed}`);
-    }
-  } else {
-    // Treat as raw keyword input
-    keyword = trimmed;
-  }
-
-  if (!keyword) {
-    throw new Error(`無法從輸入中解析出誠品搜尋關鍵字: ${trimmed}`);
-  }
-
-  const canonicalUrl = `${ESLITE_SEARCH_BASE}?keyword=${encodeURIComponent(keyword)}`;
-  return { keyword, canonicalUrl };
+function randomUA() {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
 
 /**
- * Backward compatibility alias for parseEsliteSearch.
+ * Extract the exhibition ID from a full eslite URL or bare ID string.
+ * e.g. "https://www.eslite.com/exhibitions/CU202503-00091?foo=bar" → "CU202503-00091"
+ *      "CU202503-00091" → "CU202503-00091"
+ * @param {string} input
+ * @returns {string} exhibition ID
  */
 function parseExhibitionId(input) {
-  const parsed = parseEsliteSearch(input);
-  return parsed.keyword;
+  const trimmed = input.trim();
+  // Try to extract from URL
+  const match = trimmed.match(/eslite\.com\/exhibitions\/([^?#/]+)/i) || trimmed.match(/exhibitions\/([^?#/]+)/i);
+  if (match) return match[1];
+
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    throw new Error(`無效的誠品展覽網址格式: ${trimmed}`);
+  }
+
+  // Eslite exhibition IDs are structured like "CU202503-00091"
+  if (/^[A-Z]{2}\d{6}-\d+$/i.test(trimmed) || /^CU[A-Z0-9_-]+$/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  throw new Error(`無效的誠品展覽代碼格式: ${trimmed}`);
 }
 
 /**
- * Build canonical search URL.
- * @param {string} keyword
+ * Build canonical exhibition URL for display.
+ * @param {string} exhibitionId
  * @returns {string}
  */
-function esliteSearchUrl(keyword) {
-  return `${ESLITE_SEARCH_BASE}?keyword=${encodeURIComponent(keyword)}`;
+function exhibitionUrl(exhibitionId) {
+  return `${ESLITE_EXHIBITION_BASE}/${exhibitionId}`;
 }
 
 /**
- * Fetch search results for a keyword via the Holmes search API.
- * @param {string} keyword
- * @param {object} [options]
- * @returns {Promise<object[]>} normalized product list
+ * Fetch all products from an Eslite exhibition page via the public API.
+ * Handles 404 (exhibition sold out / temporarily hidden) gracefully by returning an empty list.
+ * @param {string} exhibitionId  e.g. "CU202503-00091"
+ * @returns {Promise<object[]>}  flat array of product info objects
  */
-async function fetchSearchProducts(keyword, options = {}) {
-  const pageSize = options.pageSize || 40;
-  const pageNo = options.pageNo || 1;
-  const sort = options.sort || 'desc';
-
-  const params = new URLSearchParams({
-    q: keyword,
-    page_size: String(pageSize),
-    page_no: String(pageNo),
-    final_price: '0,',
-    sort,
-    branch_id: '1',
-    facet: 'false',
-  });
-
-  const url = `${HOLMES_SEARCH_API}?${params.toString()}`;
+async function fetchExhibitionProducts(exhibitionId) {
+  const url = `${ESLITE_API_BASE}/${exhibitionId}`;
   const res = await fetch(url, {
     headers: {
-      'User-Agent': USER_AGENT,
+      'User-Agent': randomUA(),
       'Accept': 'application/json, text/plain, */*',
       'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
-      'Referer': `${ESLITE_SEARCH_BASE}?keyword=${encodeURIComponent(keyword)}`,
+      'Referer': `${ESLITE_EXHIBITION_BASE}/${exhibitionId}`,
+      'Origin': 'https://www.eslite.com',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'same-site',
     },
     signal: AbortSignal.timeout(15_000),
   });
 
+  if (res.status === 404) {
+    // Exhibition is currently closed, sold out or not published
+    return [];
+  }
+
   if (!res.ok) {
-    throw new Error(`Eslite Search API fetch failed for "${keyword}": HTTP ${res.status}`);
+    throw new Error(`Eslite API fetch failed for ${exhibitionId}: HTTP ${res.status}`);
   }
 
   const data = await res.json();
-  const rawList = Array.isArray(data.results) ? data.results : [];
-
-  return rawList.map(item => ({
-    id: String(item.id),
-    guid: String(item.id),
-    name: item.name || '(未知商品)',
-    price: parseInt(item.final_price || '0', 10) || 0,
-    photo: item.product_photo_url || '',
-    url: `${ESLITE_PRODUCT_BASE}/${item.id}`,
-    buttonStatus: item.button_status || '',
-    availability: item.availability || '',
-    status: item.button_status || '',
-    inStock: isInStock(item),
-  }));
+  return flattenProducts(data);
 }
 
 /**
- * Returns true if a product is currently orderable / in stock.
- * @param {object} item
- * @returns {boolean}
+ * Recursively flatten all products from the nested eslite API response.
+ * @param {object} data
+ * @returns {object[]}
  */
-function isInStock(item) {
-  if (typeof item.inStock === 'boolean') return item.inStock;
-  const status = item.button_status || item.buttonStatus || item.status || '';
-  return status === 'add_to_shopping_cart' || status === 'in_stock';
+function flattenProducts(data) {
+  const products = new Map();
+
+  function addProduct(p) {
+    if (!p || !p.product_guid) return;
+    const guid = p.product_guid;
+    if (!products.has(guid)) {
+      products.set(guid, {
+        guid,
+        name: p.name || '(未知商品)',
+        stock: typeof p.stock === 'number' ? p.stock : 0,
+        status: p.status || '',
+        url: `${ESLITE_PRODUCT_BASE}/${guid}`,
+      });
+    }
+  }
+
+  for (const content of (data.contents || [])) {
+    // Single product embed
+    if (content.product) addProduct(content.product);
+
+    // List-of-products sections
+    for (const bookList of (content.book_list || [])) {
+      for (const p of (bookList.products || [])) {
+        addProduct(p);
+      }
+    }
+  }
+
+  return [...products.values()];
 }
 
 /**
- * Returns true if a product is coming soon / pre-orderable.
- * @param {object} item
- * @returns {boolean}
- */
-function isComingSoon(item) {
-  if (typeof item.comingSoon === 'boolean') return item.comingSoon;
-  const status = item.button_status || item.buttonStatus || item.status || '';
-  return status === 'coming_soon_book' || status === 'coming_soon_not_book' || status === 'coming_soon';
-}
-
-/**
- * Build a normalized snapshot Map of products for a keyword search.
- * Keyed by id → { id, guid, name, price, photo, url, buttonStatus, status, inStock, comingSoon }
+ * Build a normalized snapshot Map of all products in an exhibition.
+ * Keyed by product_guid → { guid, name, url, stock, status, inStock }
  *
- * @param {string} keyword
+ * @param {string} exhibitionId
  * @returns {Promise<Map<string, object>>}
  */
-async function snapshotEsliteSearch(keyword) {
-  const products = await fetchSearchProducts(keyword);
+async function snapshotExhibition(exhibitionId) {
+  const products = await fetchExhibitionProducts(exhibitionId);
   const snapshot = new Map();
 
   for (const p of products) {
-    snapshot.set(p.id, {
-      id: p.id,
-      guid: p.id,
+    snapshot.set(p.guid, {
+      guid: p.guid,
       name: p.name,
-      price: p.price,
-      photo: p.photo,
       url: p.url,
-      buttonStatus: p.buttonStatus,
+      stock: p.stock,
       status: p.status,
-      inStock: p.inStock,
-      comingSoon: isComingSoon(p),
+      inStock: isInStock(p),
     });
   }
 
@@ -178,65 +158,61 @@ async function snapshotEsliteSearch(keyword) {
 }
 
 /**
- * Compare two snapshots and return restock and new arrival events.
+ * Returns true if a product is considered "in stock" (orderable).
+ * stock > 0  = real qty available
+ * stock == -1 = can order regardless of qty (補貨中)
+ * status != "coming_soon_not_book" = not yet on sale
+ */
+function isInStock(p) {
+  if (p.status === 'coming_soon_not_book') return false;
+  return p.stock > 0 || p.stock === -1;
+}
+
+/**
+ * Compare two snapshots and return restock events.
+ * A restock is when a product transitions from out-of-stock to in-stock.
  *
  * @param {Map<string, object>} prevSnapshot
  * @param {Map<string, object>} currSnapshot
- * @returns {Array<{ id, guid, name, price, photo, url, prevStatus, currStatus, isNewProduct, eventType }>}
+ * @returns {Array<{ guid, name, url, prevStock, currStock, isNewProduct }>}
  */
 function detectRestocks(prevSnapshot, currSnapshot) {
-  const events = [];
+  const restocks = [];
 
-  for (const [id, curr] of currSnapshot) {
-    const prev = prevSnapshot.get(id);
-    const currInStock = isInStock(curr);
-    const currComingSoon = isComingSoon(curr);
+  for (const [guid, curr] of currSnapshot) {
+    const prev = prevSnapshot.get(guid);
 
     if (!prev) {
-      // Newly appeared product
-      if (currInStock) {
-        events.push({
-          ...curr,
-          prevStatus: null,
+      // Newly appeared product — notify if in stock
+      if (curr.inStock) {
+        restocks.push({
+          guid,
+          name: curr.name,
+          url: curr.url,
+          prevStock: 0,
+          currStock: curr.stock,
+          status: curr.status,
           isNewProduct: true,
-          eventType: 'new_product',
-        });
-      } else if (currComingSoon) {
-        events.push({
-          ...curr,
-          prevStatus: null,
-          isNewProduct: true,
-          eventType: 'coming_soon',
         });
       }
       continue;
     }
 
-    const prevInStock = isInStock(prev);
-    const prevComingSoon = isComingSoon(prev);
-
-    // Status transition: was out of stock, now in stock
-    if (!prevInStock && currInStock) {
-      const eventType = prevComingSoon ? 'on_sale' : 'restock';
-      events.push({
-        ...curr,
-        prevStatus: prev.buttonStatus || prev.status,
-        currStatus: curr.buttonStatus || curr.status,
+    // Restock transition: was out-of-stock, now in-stock
+    if (!prev.inStock && curr.inStock) {
+      restocks.push({
+        guid,
+        name: curr.name,
+        url: curr.url,
+        prevStock: prev.stock,
+        currStock: curr.stock,
+        status: curr.status,
         isNewProduct: false,
-        eventType,
-      });
-    } else if (!prevComingSoon && currComingSoon) {
-      events.push({
-        ...curr,
-        prevStatus: prev.buttonStatus || prev.status,
-        currStatus: curr.buttonStatus || curr.status,
-        isNewProduct: false,
-        eventType: 'coming_soon',
       });
     }
   }
 
-  return events;
+  return restocks;
 }
 
 /**
@@ -244,49 +220,27 @@ function detectRestocks(prevSnapshot, currSnapshot) {
  */
 function serializeSnapshot(snapshot) {
   return Object.fromEntries(
-    [...snapshot.values()].map(p => [
-      p.id,
-      {
-        id: p.id,
-        guid: p.id,
-        name: p.name,
-        price: p.price,
-        photo: p.photo,
-        url: p.url,
-        buttonStatus: p.buttonStatus,
-        status: p.status,
-      },
-    ])
+    [...snapshot.values()].map(p => [p.guid, { guid: p.guid, name: p.name, url: p.url, stock: p.stock, status: p.status }])
   );
 }
 
 /**
- * Deserialize a plain object back into a Map<id, product>.
+ * Deserialize a plain object back into a Map<guid, product>.
  */
 function deserializeSnapshot(obj) {
   if (!obj || typeof obj !== 'object') return new Map();
   return new Map(
-    Object.values(obj).map(p => [
-      p.id,
-      {
-        ...p,
-        inStock: isInStock(p),
-        comingSoon: isComingSoon(p),
-      },
-    ])
+    Object.values(obj).map(p => [p.guid, { ...p, inStock: isInStock(p) }])
   );
 }
 
 module.exports = {
-  parseEsliteSearch,
   parseExhibitionId,
-  parseExhibitionUrl: parseEsliteSearch,
-  exhibitionUrl: esliteSearchUrl,
-  esliteSearchUrl,
-  fetchSearchProducts,
-  snapshotEsliteSearch,
-  snapshotExhibition: snapshotEsliteSearch,
+  parseExhibitionUrl: parseExhibitionId,
+  exhibitionUrl,
+  snapshotExhibition,
   detectRestocks,
   serializeSnapshot,
   deserializeSnapshot,
+  fetchExhibitionProducts,
 };

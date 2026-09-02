@@ -45,7 +45,7 @@ module.exports = {
         ptt: { title: '🔑 **PTT 訂閱**', items: [] },
         shop: { title: '🛍️ **Funbox 商店補貨**', items: [] },
         momo: { title: '🍑 **momo 補貨**', items: [] },
-        eslite: { title: '📚 **誠品關鍵字補貨**', items: [] },
+        eslite: { title: '📚 **誠品展覽補貨**', items: [] },
         shopee: { title: '🟠 **蝦皮 Shopee 追蹤**', items: [] },
       };
 
@@ -61,7 +61,7 @@ module.exports = {
         } else if (r.platform === 'momo') {
           sections.momo.items.push(`\`${num}\`. 🍑 **[momo]** ${momoLabel(r.category_url)} (${dest}) \`[momo-${r.id}]\``);
         } else if (r.platform === 'eslite') {
-          sections.eslite.items.push(`\`${num}\`. 📚 **[誠品]** ${r.keyword} (${dest}) \`[eslite-${r.id}]\``);
+          sections.eslite.items.push(`\`${num}\`. 📚 **[誠品]** \`${r.exhibition_id}\` (${dest}) \`[eslite-${r.id}]\``);
         } else if (r.platform === 'shopee') {
           const label = r.keyword ? `🔑 ${r.keyword} (shop:${r.shop_id || '全站'})` : `🏬 shop:${r.shop_id}`;
           sections.shopee.items.push(`\`${num}\`. 🟠 **[蝦皮]** ${label} (${dest}) \`[shopee-${r.id}]\``);

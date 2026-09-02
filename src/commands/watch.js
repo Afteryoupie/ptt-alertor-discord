@@ -3,7 +3,7 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const db = require('../database');
 const { parseCategoryInput: parseShopCategoryInput } = require('../shop-scraper');
-const { parseEsliteSearch, esliteSearchUrl } = require('../eslite-scraper');
+const { parseExhibitionId, exhibitionUrl } = require('../eslite-scraper');
 const { parseCategoryInput: parseMomoCategoryInput, categoryUrl: momoCategoryUrl } = require('../momo-scraper');
 const { parseShopeeUrl } = require('../shopee-scraper');
 const { normalizeArticleUrl, crawlArticle } = require('../thread-scraper');
@@ -72,24 +72,24 @@ function handleAddByPlatform(platform, rawInput, userId, targetId, targetType, g
   }
 
   if (platform === 'eslite') {
-    const parsed = parseEsliteSearch(rawInput);
-    const existing = db.findEsliteSubscription({ user_id: userId, target_id: targetId, keyword: parsed.keyword });
+    const exhibitionId = parseExhibitionId(rawInput);
+    const canonicalUrl = exhibitionUrl(exhibitionId);
+    const existing = db.findEsliteSubscription({ user_id: userId, target_id: targetId, exhibition_id: exhibitionId });
     if (existing) {
-      return { status: 'exists', message: `⚠️ 這個誠品關鍵字已經在追蹤中了（ID: eslite-${existing.id}）` };
+      return { status: 'exists', message: `⚠️ 這個誠品展覽已經在追蹤中了（ID: eslite-${existing.id}）` };
     }
     const subId = db.addEsliteSubscription({
       user_id: userId,
       target_id: targetId,
       target_type: targetType,
-      keyword: parsed.keyword,
-      search_url: parsed.canonicalUrl,
+      exhibition_id: exhibitionId,
       guild_id: guildId || '',
     });
     return {
       status: 'success',
       platformName: '📗 誠品線上',
-      title: `關鍵字：「${parsed.keyword}」`,
-      canonicalUrl: parsed.canonicalUrl,
+      title: `展覽代碼：\`${exhibitionId}\``,
+      canonicalUrl,
       id: `eslite-${subId}`,
     };
   }
@@ -169,8 +169,8 @@ module.exports = {
     .addSubcommand(sub =>
       sub
         .setName('eslite')
-        .setDescription('新增誠品線上關鍵字搜尋補貨追蹤')
-        .addStringOption(opt => opt.setName('url').setDescription('誠品搜尋網址或關鍵字（例如 beyblade x）').setRequired(true))
+        .setDescription('新增誠品線上展覽補貨追蹤')
+        .addStringOption(opt => opt.setName('url').setDescription('誠品展覽網址或展覽代碼（例如 CU202503-00091）').setRequired(true))
     )
     .addSubcommand(sub =>
       sub
@@ -220,7 +220,7 @@ module.exports = {
             '支援的平台網址範例：',
             '• **蝦皮 Shopee**：`https://shopee.tw/search?keyword=戰鬥陀螺&shop=11664018`',
             '• **momo 購物網**：`https://www.momoshop.com.tw/TP/TP0002451/search?keyword=戰鬥陀螺`',
-            '• **誠品線上**：`https://www.eslite.com/Search?keyword=beyblade+x` 或直接輸入關鍵字',
+            '• **誠品線上**：`https://www.eslite.com/exhibitions/CU202503-00091` 或輸入展覽代碼',
             '• **Funbox 商店**：`https://shop.funbox.com.tw/categories/XI/KB`',
           ].join('\n'),
           flags: [MessageFlags.Ephemeral],

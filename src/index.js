@@ -17,11 +17,11 @@ const {
   deserializeSnapshot,
 } = require('./shop-scraper');
 const {
-  snapshotEsliteSearch,
+  snapshotExhibition,
   detectRestocks: detectEsliteRestocks,
   serializeSnapshot: serializeEsliteSnapshot,
   deserializeSnapshot: deserializeEsliteSnapshot,
-  esliteSearchUrl,
+  exhibitionUrl,
 } = require('./eslite-scraper');
 const {
   parseCategoryInput,
@@ -527,13 +527,13 @@ function startShopScraperLoop() {
   schedule();
 }
 
-// ─── Eslite Keyword Search Restock Scraper Loop ────────────────────────────────
+// ─── Eslite Exhibition Restock Scraper Loop ──────────────────────────────────
 
 /**
- * Core eslite keyword search restock loop:
- * 1. Fetch all subscribed eslite search keywords (distinct)
- * 2. For each keyword: fetch current inventory snapshot via Holmes API
- * 3. Compare against stored snapshot to detect restocks / new items / coming-soon
+ * Core eslite exhibition restock loop:
+ * 1. Fetch all subscribed eslite exhibitions (distinct)
+ * 2. For each exhibition: fetch current inventory snapshot from Eslite API
+ * 3. Compare against stored snapshot to detect restocks
  * 4. Notify subscribed channels/DMs and save updated snapshot
  * 5. Wait ESLITE_POLL_INTERVAL ms, then repeat
  */
@@ -554,55 +554,55 @@ function startEsliteScraperLoop() {
     running = true;
 
     try {
-      const keywords = db.getAllEsliteKeywords();
-      if (!keywords.length) {
+      const exhibitions = db.getAllEsliteExhibitions();
+      if (!exhibitions.length) {
         // No eslite subscriptions yet — silent
         return;
       }
 
-      console.log(`[eslite] === 開始掃描誠品關鍵字搜尋庫存 (${keywords.length} 個關鍵字) ===`);
+      console.log(`[eslite] === 開始掃描誠品展覽庫存 (${exhibitions.length} 個展覽) ===`);
       const allRestockMatches = [];
 
-      for (const keyword of keywords) {
+      for (const exhibitionId of exhibitions) {
         try {
           // Fetch fresh snapshot
-          const currSnapshot = await snapshotEsliteSearch(keyword);
+          const currSnapshot = await snapshotExhibition(exhibitionId);
 
-          if (!currSnapshot || currSnapshot.size === 0) {
-            console.warn(`[eslite] [${keyword}] ⚠️ 抓取結果為空快照，跳過更新以防誤判庫存變動。`);
+          if (!currSnapshot) {
+            console.warn(`[eslite] [${exhibitionId}] ⚠️ 無法取得快照，跳過本輪。`);
             continue;
           }
 
           // Load previous snapshot
-          const prevRaw = db.getEsliteSnapshot(keyword);
+          const prevRaw = db.getEsliteSnapshot(exhibitionId);
           const prevSnapshot = prevRaw ? deserializeEsliteSnapshot(prevRaw) : null;
 
           if (!prevSnapshot) {
             // First run: save baseline, no notifications
-            console.log(`[eslite] [${keyword}] 首次掃描，儲存基準庫存快照（共 ${currSnapshot.size} 件商品）。`);
-            db.upsertEsliteSnapshot(keyword, serializeEsliteSnapshot(currSnapshot));
+            console.log(`[eslite] [${exhibitionId}] 首次掃描，儲存基準庫存快照（共 ${currSnapshot.size} 件商品）。`);
+            db.upsertEsliteSnapshot(exhibitionId, serializeEsliteSnapshot(currSnapshot));
             continue;
           }
 
-          // Detect restocks / new products / coming soon
-          const events = detectEsliteRestocks(prevSnapshot, currSnapshot);
+          // Detect restocks
+          const restocks = detectEsliteRestocks(prevSnapshot, currSnapshot);
 
           // Always update snapshot
-          db.upsertEsliteSnapshot(keyword, serializeEsliteSnapshot(currSnapshot));
+          db.upsertEsliteSnapshot(exhibitionId, serializeEsliteSnapshot(currSnapshot));
 
-          if (!events.length) {
-            console.log(`[eslite] [${keyword}] 無庫存變動。`);
+          if (!restocks.length) {
+            console.log(`[eslite] [${exhibitionId}] 無補貨變動。`);
             continue;
           }
 
-          console.log(`[eslite] [${keyword}] 發現 ${events.length} 筆變動事件！`);
+          console.log(`[eslite] [${exhibitionId}] 發現 ${restocks.length} 筆補貨！`);
 
-          const subs = db.getEsliteSubsForKeyword(keyword);
-          for (const event of events) {
+          const subs = db.getEsliteSubsForExhibition(exhibitionId);
+          for (const restock of restocks) {
             for (const sub of subs) {
               allRestockMatches.push({
-                event,
-                keyword,
+                restock,
+                exhibitionId,
                 targetId: sub.target_id,
                 targetType: sub.target_type,
                 userId: sub.user_id,
@@ -610,15 +610,15 @@ function startEsliteScraperLoop() {
             }
           }
         } catch (err) {
-          console.error(`[eslite] Error checking "${keyword}":`, err.message);
+          console.error(`[eslite] Error checking ${exhibitionId}:`, err.message);
         }
 
-        // Polite cooldown between keyword search requests
-        if (keywords.length > 1) await sleep(COOLDOWN_MS);
+        // Polite cooldown between exhibition requests
+        if (exhibitions.length > 1) await sleep(COOLDOWN_MS);
       }
 
       if (allRestockMatches.length) {
-        console.log(`[eslite] 🚀 發送 ${allRestockMatches.length} 則誠品變動通知...`);
+        console.log(`[eslite] 🚀 發送 ${allRestockMatches.length} 則誠品補貨通知...`);
         await sendEsliteRestockNotifications(client, allRestockMatches);
       }
 

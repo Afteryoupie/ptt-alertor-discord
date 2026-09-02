@@ -28,7 +28,7 @@ function formatSubDescription(sub) {
     case 'momo':
       return `🍑 **[momo]** ${momoLabel(sub.category_url)} \`[momo-${sub.id}]\``;
     case 'eslite':
-      return `📚 **[誠品]** ${sub.keyword} \`[eslite-${sub.id}]\``;
+      return `📚 **[誠品]** \`${sub.exhibition_id}\` \`[eslite-${sub.id}]\``;
     case 'shopee':
       return `🟠 **[蝦皮]** ${sub.keyword ? `🔑 ${sub.keyword}` : `🏬 shop:${sub.shop_id}`} \`[shopee-${sub.id}]\``;
     default:
@@ -45,7 +45,7 @@ function getSubLabel(sub) {
     case 'momo':
       return `[momo] ${momoLabel(sub.category_url)}`;
     case 'eslite':
-      return `[誠品] ${sub.keyword}`;
+      return `[誠品] ${sub.exhibition_id}`;
     case 'shopee':
       return `[蝦皮] ${sub.keyword || sub.shop_id || '追蹤'}`;
     default:
