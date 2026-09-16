@@ -128,21 +128,7 @@ db.exec(`
     updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
-  -- Auto-buy: encrypted session cookies per user
-  CREATE TABLE IF NOT EXISTS autobuy_configs (
-    user_id          TEXT PRIMARY KEY,
-    encrypted_cookie TEXT NOT NULL,
-    iv               TEXT NOT NULL,
-    auth_tag         TEXT NOT NULL,
-    name             TEXT,
-    email            TEXT,
-    phone            TEXT,
-    seven_store_id   TEXT DEFAULT '962380',
-    seven_store_name TEXT DEFAULT '大五股門市',
-    seven_store_addr TEXT DEFAULT '大五股門市(新北市五股區成泰路二段81號)',
-    created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+
 
   -- Per-guild PTT board state (last seen article ID per guild per board)
   CREATE TABLE IF NOT EXISTS guild_board_state (
@@ -187,101 +173,10 @@ db.exec(`
   ON sent_ptt_notifications(sent_at);
 `);
 
-// Safe migration: add new columns to existing DBs
-const profileColumns = [
-  ['name',             'TEXT'],
-  ['email',            'TEXT'],
-  ['phone',            'TEXT'],
-  ['seven_store_id',   "TEXT DEFAULT '962380'"],
-  ['seven_store_name', "TEXT DEFAULT '大五股門市'"],
-  ['seven_store_addr', "TEXT DEFAULT '大五股門市(新北市五股區成泰路二段81號)'"],
-];
-for (const [col, type] of profileColumns) {
-  try { db.exec(`ALTER TABLE autobuy_configs ADD COLUMN ${col} ${type}`); } catch (_) {}
-}
-
 // Safe migration: add guild_id to all subscription tables
 const subTables = ['subscriptions', 'shop_subscriptions', 'eslite_subscriptions', 'momo_subscriptions', 'shopee_subscriptions'];
 for (const table of subTables) {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN guild_id TEXT NOT NULL DEFAULT ''`); } catch (_) {}
-}
-
-// Safe migration / reset: ensure eslite_subscriptions uses exhibition_id schema
-try {
-  const subCols = db.pragma('table_info(eslite_subscriptions)');
-  const colNames = subCols.map(c => c.name);
-  if (colNames.includes('keyword') || !colNames.includes('exhibition_id')) {
-    db.exec(`
-      DROP TABLE IF EXISTS eslite_subscriptions;
-      CREATE TABLE eslite_subscriptions (
-        id             INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id        TEXT NOT NULL,
-        target_id      TEXT NOT NULL,
-        target_type    TEXT NOT NULL CHECK(target_type IN ('channel', 'dm')),
-        exhibition_id  TEXT NOT NULL,
-        guild_id       TEXT NOT NULL DEFAULT '',
-        created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE INDEX IF NOT EXISTS idx_eslite_subs_user ON eslite_subscriptions(user_id);
-    `);
-  }
-} catch (err) {
-  console.error('[db] Error setting up eslite_subscriptions:', err.message);
-}
-
-// Safe migration / reset: ensure eslite_snapshots uses exhibition_id primary key
-try {
-  const snapCols = db.pragma('table_info(eslite_snapshots)');
-  const snapColNames = snapCols.map(c => c.name);
-  if (snapColNames.includes('keyword') || !snapColNames.includes('exhibition_id')) {
-    db.exec(`
-      DROP TABLE IF EXISTS eslite_snapshots;
-      CREATE TABLE eslite_snapshots (
-        exhibition_id TEXT PRIMARY KEY,
-        snapshot_json TEXT NOT NULL,
-        updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-  }
-} catch (err) {
-  console.error('[db] Error setting up eslite_snapshots:', err.message);
-}
-
-// Clean up any pre-existing duplicate subscriptions across all platform tables
-try {
-  db.exec(`
-    DELETE FROM subscriptions
-    WHERE id NOT IN (
-      SELECT MIN(id) FROM subscriptions
-      GROUP BY user_id, target_id, LOWER(board), type, LOWER(match_value)
-    );
-
-    DELETE FROM shop_subscriptions
-    WHERE id NOT IN (
-      SELECT MIN(id) FROM shop_subscriptions
-      GROUP BY user_id, target_id, category_url
-    );
-
-    DELETE FROM eslite_subscriptions
-    WHERE id NOT IN (
-      SELECT MIN(id) FROM eslite_subscriptions
-      GROUP BY user_id, target_id, LOWER(exhibition_id)
-    );
-
-    DELETE FROM momo_subscriptions
-    WHERE id NOT IN (
-      SELECT MIN(id) FROM momo_subscriptions
-      GROUP BY user_id, target_id, category_url
-    );
-
-    DELETE FROM shopee_subscriptions
-    WHERE id NOT IN (
-      SELECT MIN(id) FROM shopee_subscriptions
-      GROUP BY user_id, target_id, search_url
-    );
-  `);
-} catch (err) {
-  console.error('[db] Error cleaning up duplicate subscriptions:', err.message);
 }
 
 // Add UNIQUE indexes to enforce deduplication at the DB level
@@ -956,19 +851,9 @@ function getAllEsliteExhibitions() {
   return rows.map(r => r.exhibition_id);
 }
 
-/** Backward compatibility alias. */
-function getAllEsliteKeywords() {
-  return getAllEsliteExhibitions();
-}
-
 /** Get all eslite subscriptions for a specific exhibition. */
 function getEsliteSubsForExhibition(exhibitionId) {
   return stmts.getEsliteSubsForExhibition.all({ exhibition_id: exhibitionId });
-}
-
-/** Backward compatibility alias. */
-function getEsliteSubsForKeyword(keyword) {
-  return getEsliteSubsForExhibition(keyword);
 }
 
 /** Check if an eslite subscription already exists. */
@@ -1046,50 +931,7 @@ function upsertMomoSnapshot(category_url, snapshotObj) {
   });
 }
 
-// ─── Auto-buy Config API ─────────────────────────────────────────────────────
 
-/**
- * Save or update the encrypted autobuy config for a user.
- * @param {{ user_id: string, encrypted_cookie: string, iv: string, auth_tag: string }} params
- */
-function setAutobuyConfig(params) {
-  stmts.setAutobuyConfig.run(params);
-}
-
-/**
- * Update checkout profile fields for a user.
- * @param {{ user_id, name, email, phone, seven_store_id, seven_store_name, seven_store_addr }} params
- */
-function setAutobuyProfile(params) {
-  stmts.setAutobuyProfile.run(params);
-}
-
-/**
- * Get the encrypted autobuy config for a user.
- * @param {string} user_id
- * @returns {{ encrypted_cookie: string, iv: string, auth_tag: string } | null}
- */
-function getAutobuyConfig(user_id) {
-  return stmts.getAutobuyConfig.get({ user_id }) || null;
-}
-
-/**
- * Delete the autobuy config for a user.
- * @param {string} user_id
- * @returns {number} rows deleted
- */
-function deleteAutobuyConfig(user_id) {
-  return stmts.deleteAutobuyConfig.run({ user_id }).changes;
-}
-
-/**
- * Check if a user has an autobuy config set.
- * @param {string} user_id
- * @returns {boolean}
- */
-function hasAutobuyConfig(user_id) {
-  return !!stmts.hasAutobuyConfig.get({ user_id });
-}
 
 // ─── Shopee Restock API ──────────────────────────────────────────────────────
 
@@ -1301,9 +1143,7 @@ module.exports = {
   addEsliteSubscription,
   removeEsliteSubscription,
   listEsliteSubscriptions,
-  getAllEsliteKeywords,
   getAllEsliteExhibitions,
-  getEsliteSubsForKeyword,
   getEsliteSubsForExhibition,
   findEsliteSubscription,
   getEsliteSnapshot,

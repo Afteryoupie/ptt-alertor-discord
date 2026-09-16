@@ -173,7 +173,7 @@ function sendNotifications(client, matches) {
 function sendRestockNotifications(client, matches) {
   return sendMatchNotifications(
     client, matches,
-    m => buildRestockEmbed(m.restock, m.categoryUrl, m.autobuyResult ?? null),
+    m => buildRestockEmbed(m.restock, m.categoryUrl),
     '[notifier]'
   );
 }
