@@ -5,8 +5,9 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node --max-old-space-size=128 src/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "deploy-commands": "node src/deploy-commands.js"
+    "test": "node test/db_smoke_test.js",
+    "deploy-commands": "node src/deploy-commands.js",
+    "deploy-vm": "../google-cloud-sdk/bin/gcloud compute ssh afypie-cloud --zone=us-west1-b --command=\"sudo -u abc12david git -C /home/abc12david/ptt-alertor-discord pull origin main && sudo systemctl restart ptt-alertor && sudo systemctl status ptt-alertor --no-pager\""
   },
   "keywords": [
     "ptt",
