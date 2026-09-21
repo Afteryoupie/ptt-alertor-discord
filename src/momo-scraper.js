@@ -21,17 +21,7 @@ const MOMO_BASE_URL = 'https://www.momoshop.com.tw';
 /** Maximum pages to fetch per category (user-configurable at construction, default 2). */
 const DEFAULT_MAX_PAGES = 2;
 
-const USER_AGENTS = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-];
-
-function randomUA() {
-  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
-}
+const { fetchWithTimeout } = require('./utils/fetchHelper');
 
 // ─── URL / Code Parsing ───────────────────────────────────────────────────────
 
@@ -119,10 +109,9 @@ async function fetchPage(cateCode, page) {
     },
   });
 
-  const res = await fetch(MOMO_API_URL, {
+  const res = await fetchWithTimeout(MOMO_API_URL, {
     method: 'POST',
     headers: {
-      'User-Agent':   randomUA(),
       'Content-Type': 'application/json',
       'Accept':       'application/json, text/plain, */*',
       'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -133,8 +122,7 @@ async function fetchPage(cateCode, page) {
       'Sec-Fetch-Site': 'same-origin',
     },
     body,
-    signal: AbortSignal.timeout(15_000),
-  });
+  }, 15000);
 
   if (!res.ok) {
     throw new Error(`Momo API failed for cateCode=${cateCode} page=${page}: HTTP ${res.status}`);
