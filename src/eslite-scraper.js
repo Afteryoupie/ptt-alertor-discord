@@ -10,6 +10,10 @@
 //   stock == 0  — out of stock
 //   status == "coming_soon_not_book" — pre-order / not yet on sale
 
+const path = require('path');
+const fs = require('fs');
+const { execFile } = require('child_process');
+
 const ESLITE_API_BASE = 'https://athena.eslite.com/api/v1/book_exhibits';
 const ESLITE_PRODUCT_BASE = 'https://www.eslite.com/product';
 const ESLITE_EXHIBITION_BASE = 'https://www.eslite.com/exhibitions';
@@ -24,6 +28,42 @@ const USER_AGENTS = [
 
 function randomUA() {
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+function getPythonPath() {
+  const venvPython = path.resolve(__dirname, '../.venv/bin/python3');
+  if (fs.existsSync(venvPython)) return venvPython;
+  return process.env.PYTHON_BIN || 'python3';
+}
+
+/**
+ * Fallback fetch using curl_cffi with Chrome TLS impersonation to bypass Cloudflare 403.
+ * @param {string} exhibitionId
+ * @returns {Promise<object|null>}
+ */
+function fetchExhibitionViaTls(exhibitionId) {
+  return new Promise((resolve) => {
+    const pythonBin = getPythonPath();
+    const scriptPath = path.resolve(__dirname, 'utils/eslite_tls_fetcher.py');
+
+    execFile(pythonBin, [scriptPath, exhibitionId], { timeout: 20_000 }, (error, stdout, stderr) => {
+      if (error) {
+        console.warn(`[eslite] [${exhibitionId}] TLS impersonation fetch 失敗: ${stderr ? stderr.trim() : error.message}`);
+        return resolve(null);
+      }
+      try {
+        const parsed = JSON.parse(stdout);
+        if (parsed.status === 404) return resolve([]);
+        if (parsed.status === 200 && parsed.data) {
+          return resolve(parsed.data);
+        }
+        resolve(null);
+      } catch (parseErr) {
+        console.warn(`[eslite] [${exhibitionId}] TLS impersonation JSON 解析失敗: ${parseErr.message}`);
+        resolve(null);
+      }
+    });
+  });
 }
 
 /**
@@ -149,7 +189,13 @@ async function fetchExhibitionProducts(exhibitionId) {
     // Reset cached cookie to force refresh on next try
     cachedCookie = null;
     cookieExpiry = 0;
-    console.warn(`[eslite] [${exhibitionId}] ⚠️ 遇到 Cloudflare 403（機房 IP 或會話受阻），暫時跳過本輪更新以防誤判。`);
+    console.warn(`[eslite] [${exhibitionId}] ⚠️ 遇到 Cloudflare 403（機房 IP 或會話受阻），嘗試以 Chrome TLS 指紋重試...`);
+    const fallbackData = await fetchExhibitionViaTls(exhibitionId);
+    if (fallbackData) {
+      console.log(`[eslite] [${exhibitionId}] ✅ 透過 TLS 指紋偽裝成功取得展覽資料 (${fallbackData.name || exhibitionId})。`);
+      return flattenProducts(fallbackData);
+    }
+    console.warn(`[eslite] [${exhibitionId}] ⚠️ TLS 指紋重試仍無法取得資料，暫時跳過本輪更新以防誤判。`);
     return null;
   }
 
