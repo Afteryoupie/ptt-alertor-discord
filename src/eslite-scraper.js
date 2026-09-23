@@ -14,7 +14,8 @@ const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
 
-const ESLITE_API_BASE = 'https://athena.eslite.com/api/v1/book_exhibits';
+const ESLITE_DEFAULT_API_BASE = 'https://athena.eslite.com/api/v1/book_exhibits';
+const ESLITE_API_BASE = process.env.ESLITE_API_BASE || ESLITE_DEFAULT_API_BASE;
 const ESLITE_PRODUCT_BASE = 'https://www.eslite.com/product';
 const ESLITE_EXHIBITION_BASE = 'https://www.eslite.com/exhibitions';
 
@@ -157,7 +158,8 @@ async function fetchExhibitionProducts(exhibitionId) {
   const ua = randomUA();
   const cookie = await getEsliteCookie(ua, dispatcher);
 
-  const url = `${ESLITE_API_BASE}/${exhibitionId}`;
+  const apiBase = process.env.ESLITE_API_BASE || ESLITE_API_BASE;
+  const url = `${apiBase}/${exhibitionId}`;
   const fetchOptions = {
     headers: {
       'User-Agent': ua,
@@ -178,18 +180,29 @@ async function fetchExhibitionProducts(exhibitionId) {
     fetchOptions.dispatcher = dispatcher;
   }
 
-  const res = await fetch(url, fetchOptions);
+  let res;
+  try {
+    res = await fetch(url, fetchOptions);
+  } catch (fetchErr) {
+    console.warn(`[eslite] [${exhibitionId}] API 請求異常 (${fetchErr.message})，嘗試以 Chrome TLS 指紋直連重試...`);
+    const fallbackData = await fetchExhibitionViaTls(exhibitionId);
+    if (fallbackData) {
+      console.log(`[eslite] [${exhibitionId}] ✅ 透過 TLS 指紋偽裝成功取得展覽資料 (${fallbackData.name || exhibitionId})。`);
+      return flattenProducts(fallbackData);
+    }
+    throw fetchErr;
+  }
 
   if (res.status === 404) {
     // Exhibition is currently closed, sold out or not published
     return [];
   }
 
-  if (res.status === 403) {
+  if (res.status === 403 || res.status >= 500) {
     // Reset cached cookie to force refresh on next try
     cachedCookie = null;
     cookieExpiry = 0;
-    console.warn(`[eslite] [${exhibitionId}] ⚠️ 遇到 Cloudflare 403（機房 IP 或會話受阻），嘗試以 Chrome TLS 指紋重試...`);
+    console.warn(`[eslite] [${exhibitionId}] ⚠️ API 回傳 HTTP ${res.status}，嘗試以 Chrome TLS 指紋重試...`);
     const fallbackData = await fetchExhibitionViaTls(exhibitionId);
     if (fallbackData) {
       console.log(`[eslite] [${exhibitionId}] ✅ 透過 TLS 指紋偽裝成功取得展覽資料 (${fallbackData.name || exhibitionId})。`);
