@@ -5,6 +5,7 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, Collection, MessageFlags } = require('discord.js');
 const path = require('path');
 const fs = require('fs');
+const { nextEsliteDelay } = require('./utils/eslite-schedule');
 
 const db = require('./database');
 const { crawlBoard, matchKeyword, matchAuthor } = require('./scraper');
@@ -561,7 +562,6 @@ function startEsliteScraperLoop() {
       }
 
       console.log(`[eslite] === 開始掃描誠品展覽庫存 (${exhibitions.length} 個展覽) ===`);
-      const allRestockMatches = [];
 
       for (const exhibitionId of exhibitions) {
         try {
@@ -595,8 +595,9 @@ function startEsliteScraperLoop() {
             continue;
           }
 
-          console.log(`[eslite] [${exhibitionId}] 發現 ${restocks.length} 筆補貨！`);
+          console.log(`[eslite] [${exhibitionId}] 發現 ${restocks.length} 筆補貨！ (${new Date().toISOString()})`);
 
+          const allRestockMatches = [];
           const subs = db.getEsliteSubsForExhibition(exhibitionId);
           for (const restock of restocks) {
             for (const sub of subs) {
@@ -609,17 +610,15 @@ function startEsliteScraperLoop() {
               });
             }
           }
+          console.log(`[eslite] 🚀 發送 ${allRestockMatches.length} 則誠品補貨通知...`);
+          await sendEsliteRestockNotifications(client, allRestockMatches);
+          console.log(`[eslite] ✅ 補貨通知處理完成 (${new Date().toISOString()})`);
         } catch (err) {
           console.error(`[eslite] Error checking ${exhibitionId}:`, err.message);
         }
 
         // Polite cooldown between exhibition requests
         if (exhibitions.length > 1) await sleep(COOLDOWN_MS);
-      }
-
-      if (allRestockMatches.length) {
-        console.log(`[eslite] 🚀 發送 ${allRestockMatches.length} 則誠品補貨通知...`);
-        await sendEsliteRestockNotifications(client, allRestockMatches);
       }
 
       console.log(`[eslite] === 循環結束 (${new Date().toLocaleTimeString('zh-TW')}) ===`);
@@ -633,8 +632,10 @@ function startEsliteScraperLoop() {
   async function schedule() {
     await tick();
     const interval = db.getMinIntervalMsAcrossGuilds('eslite_poll_interval_ms', ENV_INTERVALS.eslite_poll_interval_ms);
-    console.log(`[eslite] ⏳ 下次掃描於 ${interval / 1000}s 後。`);
-    setTimeout(schedule, interval);
+    const fastEnabled = process.env.ESLITE_FAST_POLL_ENABLED !== 'false' && isWithinOperatingHours('eslite');
+    const delay = nextEsliteDelay(Date.now(), interval, fastEnabled);
+    console.log(`[eslite] ⏳ 下次掃描於 ${delay / 1000}s 後。`);
+    setTimeout(schedule, delay);
   }
 
   schedule();
